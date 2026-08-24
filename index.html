@@ -1,0 +1,27 @@
+<body>
+  <h1>我的第一个网页</h1>
+  <p>这是知乎学习产品的第一个页面。</p>
+
+  <button id="load-data">从后端获取数据</button>
+
+  <p id="result">还没有请求后端。</p>
+
+  <script>
+    const button = document.querySelector('#load-data');
+    const result = document.querySelector('#result');
+
+    button.addEventListener('click', async () => {
+      result.textContent = '正在请求后端……';
+
+      try {
+        const response = await fetch('/api/hello');
+        const data = await response.json();
+
+        result.textContent =
+          `${data.message}，服务器时间：${data.serverTime}`;
+      } catch (error) {
+        result.textContent = '请求后端失败。';
+      }
+    });
+  </script>
+</body>
