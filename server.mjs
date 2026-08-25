@@ -8,8 +8,10 @@ const server = http.createServer(async (request, response) => {
   if (request.url === '/api/hello') {
     const data = {
       message: '你好，这是后端返回的数据',
-      serverTime: new Date().toLocaleString('zh-CN')
+      serverTime: new Date().toLocaleString('zh-CN', {
+       timeZone: 'Asia/Shanghai'})
     };
+    
 
     response.writeHead(200, {
       'Content-Type': 'application/json; charset=utf-8'
