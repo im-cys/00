@@ -5,7 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node ./node_modules/esbuild/bin/esbuild app.js --bundle --format=iife --platform=browser --target=es2020 --outfile=app.bundle.js",
+    "build": "node scripts/build.mjs",
     "prestart": "npm run build",
     "start": "node server.mjs",
     "test": "node --test"
