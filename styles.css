@@ -459,6 +459,37 @@ a { color: inherit; text-decoration: none; }
 .install-steps { margin: 0 0 20px; padding-left: 22px; color: #555c66; font-size: 12px; line-height: 1.8; }
 .install-steps code { padding: 2px 5px; border-radius: 5px; background: #f0f1f3; }
 .modal-actions .button { text-decoration: none; }
+.button:disabled { cursor: not-allowed; opacity: .56; }
+.auth-modal { width: min(620px, calc(100% - 32px)); max-height: min(880px, calc(100vh - 32px)); overflow-y: auto; }
+.auth-heading { display: flex; align-items: center; gap: 18px; margin-bottom: 24px; }
+.auth-heading .modal-orb { flex: 0 0 auto; width: 54px; height: 54px; margin: 0; }
+.auth-heading h2 { margin: 7px 0 5px; }
+.auth-heading p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.auth-flow-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 14px; background: #f1f2f4; }
+.auth-flow-switch button, .auth-method-tabs button { min-height: 40px; border: 0; border-radius: 10px; background: transparent; color: #787d85; font-weight: 700; cursor: pointer; }
+.auth-flow-switch button.active { background: white; color: var(--ink); box-shadow: 0 4px 14px rgba(21,25,35,.08); }
+.auth-method-tabs { display: flex; gap: 22px; margin: 18px 0 15px; border-bottom: 1px solid #e6e8eb; }
+.auth-method-tabs[hidden], .auth-panel[hidden], .otp-row[hidden], .auth-feedback[hidden] { display: none !important; }
+.auth-method-tabs button { position: relative; min-height: 38px; padding: 0 2px; border-radius: 0; font-size: 12px; }
+.auth-method-tabs button.active { color: var(--ink); }
+.auth-method-tabs button.active::after { content: ''; position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; border-radius: 2px; background: var(--ink); }
+.auth-panel { min-height: 190px; }
+.auth-two-column { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.auth-feedback { margin: 14px 0 0 !important; padding: 10px 12px; border-radius: 10px; background: #fff1f0; color: #b13b31 !important; font-size: 11px !important; line-height: 1.55 !important; }
+.auth-feedback[data-state="success"] { background: #f0f8e5; color: #55721a !important; }
+.auth-form-note { margin: -2px 0 0; color: #92969d; font-size: 10px; line-height: 1.55; text-align: center; }
+.auth-trust-note { padding-top: 2px; border-top: 1px solid #eff0f2; }
+.phone-input { display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; border: 1px solid #dfe1e4; border-radius: 12px; background: #fafafa; overflow: hidden; }
+.phone-input > span { padding: 0 12px; border-right: 1px solid #e2e4e7; color: #737984; font-size: 12px; }
+.modal .phone-input input { border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.phone-input:focus-within { border-color: var(--blue); background: white; box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
+.otp-row { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; gap: 10px; }
+.otp-row .button { min-width: 112px; min-height: 43px; }
+.bind-phone-modal { width: min(500px, calc(100% - 32px)); }
+.security-nudge { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 14px; margin-bottom: 18px; padding: 14px 16px; border: 1px solid #dfe5ff; border-radius: 16px; background: linear-gradient(120deg,#f5f7ff,#fbfff0); }
+.security-nudge-icon { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 11px; background: #171a1f; color: white; }
+.security-nudge strong { display: block; font-size: 12px; }
+.security-nudge p { margin: 4px 0 0; color: #737983; font-size: 10px; line-height: 1.5; }
 .toast { position: fixed; z-index: 1000; right: 24px; bottom: 24px; max-width: 360px; padding: 13px 17px; border-radius: 12px; background: #171a1f; color: white; box-shadow: var(--shadow-lg); font-size: 11px; opacity: 0; pointer-events: none; transform: translateY(10px); transition: opacity .2s ease, transform .2s ease; }
 .toast.show { opacity: 1; transform: translateY(0); }
 
@@ -527,6 +558,10 @@ a { color: inherit; text-decoration: none; }
   .list-table-row > span:not(.status-pill) { display: none; }
   .row-action { grid-column: 2; }
   .modal { padding: 28px 22px; }
+  .auth-heading { padding-right: 24px; }
+  .auth-two-column { grid-template-columns: 1fr; }
+  .security-nudge { grid-template-columns: auto minmax(0,1fr); }
+  .security-nudge .button { grid-column: 1 / -1; }
 }
 
 /* ---------- 回答代理对话页：来源 / 对话 / 观点线索三栏 ---------- */

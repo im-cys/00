@@ -4,11 +4,24 @@
  * 负责：
  * 1. 产品首页与个人中心之间的切换；
  * 2. “概览 / 我的代理 / 观点记忆 / 对话记录 / 创作草稿”五个视图的渲染；
- * 3. 原型注册、手动导入回答、确认观点等交互；
- * 4. 使用 localStorage 暂存用户、观点和对话数据。
+ * 3. CloudBase 真实登录、注册、短信验证和会话恢复；
+ * 4. 手动导入回答、确认观点等原型交互；
+ * 5. 在云端数据库接入前，继续使用 localStorage 暂存观点和对话数据。
  *
- * 不负责：真实登录、数据库和模型调用。这些能力接入后应由后端 API 替换。
+ * 不负责：云端业务数据库和真实模型调用。这些能力接入后应由后端 API 替换。
  */
+
+import {
+  beginPhoneBinding,
+  beginRegistration,
+  beginSmsSignIn,
+  completeOtpVerification,
+  getAuthenticatedAccount,
+  setNickname,
+  signInWithPassword,
+  signOutAccount,
+  toLocalProfile
+} from './cloudbase-auth.js';
 
 // ---------- 本地数据键：app.js 与 study.js 通过这些键共享原型数据 ----------
 const USER_KEY = 'viewpointAgentUser';
@@ -19,11 +32,20 @@ const SESSION_KEY = 'viewpointAgentSessions';
 const landing = document.querySelector('#landing');
 const dashboard = document.querySelector('#dashboard');
 const authDialog = document.querySelector('#auth-dialog');
+const bindPhoneDialog = document.querySelector('#bind-phone-dialog');
 const dialogueDialog = document.querySelector('#dialogue-dialog');
 const extensionDialog = document.querySelector('#extension-dialog');
 const viewContainer = document.querySelector('#view-container');
 const viewTitle = document.querySelector('#view-title');
 const toast = document.querySelector('#toast');
+
+// 验证码回调只在当前页面内短暂保留，不写入 localStorage。
+const pendingVerifications = {
+  smsLogin: null,
+  emailRegister: null,
+  phoneRegister: null,
+  phoneBinding: null
+};
 
 // ---------- 演示数据：首次进入原型时用于填充个人中心 ----------
 const sampleMemories = [
@@ -213,6 +235,7 @@ function confirmedMemoryCount() {
 function renderOverview() {
   const sessions = getSessions();
   const memories = getMemories();
+  const user = getUser();
   const confirmed = memories.filter((memory) => memory.status === 'confirmed');
   const candidate = memories.find((memory) => memory.status === 'candidate');
   const sessionRows = sessions.slice(0, 3).map((session, index) => `
@@ -247,7 +270,16 @@ function renderOverview() {
     </article>
   `;
 
+  const securityPrompt = user && !user.phone ? `
+    <section class="security-nudge">
+      <span class="security-nudge-icon" aria-hidden="true">⌁</span>
+      <div><strong>给账号多一层安全保障</strong><p>绑定手机号后可使用短信快捷登录。暂时不绑定也不影响使用。</p></div>
+      <button class="button button-soft" type="button" data-bind-phone>绑定手机号</button>
+    </section>
+  ` : '';
+
   viewContainer.innerHTML = `
+    ${securityPrompt}
     <section class="dashboard-hero">
       <div class="dashboard-hero-copy">
         <span class="section-kicker">你的代理正在成长</span>
@@ -417,40 +449,284 @@ function renderView(view) {
   history.replaceState(null, '', `/?${nextParams.toString()}`);
 }
 
-// ---------- 注册 / 登录原型 ----------
-function openAuth(mode) {
-  const login = mode === 'login';
+// ---------- CloudBase 真实注册 / 登录 ----------
+let currentAuthFlow = 'login';
+let currentLoginMethod = 'password';
+let currentRegisterMethod = 'email';
+
+function setFeedback(element, message = '', state = 'error') {
+  element.textContent = message;
+  element.dataset.state = state;
+  element.hidden = !message;
+}
+
+function friendlyAuthError(error) {
+  const message = String(error?.message || '操作失败，请稍后重试');
+  if (/network|fetch|Failed to fetch|网络/i.test(message)) return '网络连接失败，请检查安全来源配置后重试。';
+  if (/password|credential|账号|密码|invalid login/i.test(message)) return '账号或密码不正确，请重新输入。';
+  if (/provider.*not found|not enabled|未启用/i.test(message)) return '这种登录方式尚未正确启用，请检查 CloudBase 登录方式配置。';
+  if (/code|otp|token|验证码/i.test(message)) return '验证码不正确或已经过期，请重新获取。';
+  if (/already|exist|已存在|占用/i.test(message)) return '该用户名、邮箱或手机号已经被使用，请直接登录或更换后重试。';
+  if (/frequent|limit|too many|频繁/i.test(message)) return '操作过于频繁，请稍后再试。';
+  return message;
+}
+
+function setButtonBusy(button, busy, busyLabel = '处理中…') {
+  if (!button.dataset.defaultLabel) button.dataset.defaultLabel = button.textContent;
+  button.disabled = busy;
+  button.textContent = busy ? busyLabel : button.dataset.defaultLabel;
+}
+
+function normalizePhone(value) {
+  return value.replace(/\D/g, '').replace(/^86(?=1\d{10}$)/, '');
+}
+
+function requireMainlandPhone(value) {
+  const phone = normalizePhone(value);
+  if (!/^1\d{10}$/.test(phone)) throw new Error('请输入正确的 11 位中国大陆手机号。');
+  return phone;
+}
+
+function requireUsername(value) {
+  const username = value.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.:+@-]{4,23}$/.test(username)) {
+    throw new Error('用户名需为 5–24 位英文、数字或 -_.:+@，并以英文或数字开头。');
+  }
+  return username;
+}
+
+function showAuthPanel() {
+  document.querySelector('#login-method-tabs').hidden = currentAuthFlow !== 'login';
+  document.querySelector('#register-method-tabs').hidden = currentAuthFlow !== 'register';
+  document.querySelectorAll('[data-auth-panel]').forEach((panel) => {
+    const expected = currentAuthFlow === 'login'
+      ? `${currentLoginMethod}-login`
+      : `${currentRegisterMethod}-register`;
+    panel.hidden = panel.dataset.authPanel !== expected;
+  });
+}
+
+function setAuthFlow(flow) {
+  currentAuthFlow = flow === 'register' ? 'register' : 'login';
+  const login = currentAuthFlow === 'login';
   document.querySelector('#auth-kicker').textContent = login ? '欢迎回来' : '开始建立你的观点档案';
   document.querySelector('#auth-title').textContent = login ? '登录观点分身' : '创建我的观点分身';
   document.querySelector('#auth-description').textContent = login
-    ? '原型阶段输入任意有效邮箱即可回到个人中心。'
-    : '先用一个名字进入原型。之后的每条长期记忆仍需由你亲自确认。';
-  document.querySelector('#auth-submit').textContent = login ? '登录个人中心' : '进入个人中心';
+    ? '进入你的观点档案，继续尚未完成的讨论。'
+    : '可选择邮箱或手机号验证，不强制要求绑定手机。';
+  document.querySelectorAll('[data-auth-flow]').forEach((button) => {
+    const active = button.dataset.authFlow === currentAuthFlow;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+  setFeedback(document.querySelector('#auth-feedback'));
+  showAuthPanel();
+}
+
+function openAuth(mode = 'login') {
+  setAuthFlow(mode);
   openModal(authDialog);
+}
+
+function seedLocalPrototypeData() {
+  if (!localStorage.getItem(MEMORY_KEY)) saveMemories(sampleMemories);
+  if (!localStorage.getItem(SESSION_KEY)) saveSessions(sampleSessions);
+}
+
+async function finishAccountAccess(nickname = '', successMessage = '登录成功，欢迎回来') {
+  if (nickname) {
+    try {
+      await setNickname(nickname);
+    } catch (error) {
+      console.warn('昵称暂时未同步到 CloudBase：', error);
+    }
+  }
+
+  const account = await getAuthenticatedAccount();
+  if (!account?.user) throw new Error('登录完成，但没有读取到有效账户，请刷新后重试。');
+  const user = toLocalProfile(account.user);
+  if (nickname && !user.nickname) user.name = nickname;
+  localStorage.setItem(USER_KEY, JSON.stringify(user));
+  seedLocalPrototypeData();
+  window.dispatchEvent(new CustomEvent('viewpoint-agent-user-ready', { detail: { uid: user.uid } }));
+  closeModal(authDialog);
+  showDashboard(user);
+  showToast(user.phone ? successMessage : `${successMessage}；建议随后绑定手机号`);
+}
+
+function startResendCountdown(button, seconds = 60) {
+  clearInterval(button.countdownTimer);
+  let remaining = seconds;
+  button.disabled = true;
+  button.textContent = `${remaining} 秒后重发`;
+  button.countdownTimer = setInterval(() => {
+    remaining -= 1;
+    button.textContent = remaining > 0 ? `${remaining} 秒后重发` : '重新发送';
+    if (remaining <= 0) {
+      clearInterval(button.countdownTimer);
+      button.disabled = false;
+    }
+  }, 1000);
 }
 
 document.querySelectorAll('[data-auth-mode]').forEach((button) => {
   button.addEventListener('click', () => openAuth(button.dataset.authMode));
 });
 
+document.querySelectorAll('[data-auth-flow]').forEach((button) => {
+  button.addEventListener('click', () => setAuthFlow(button.dataset.authFlow));
+});
+
+document.querySelectorAll('[data-auth-method]').forEach((button) => {
+  button.addEventListener('click', () => {
+    currentLoginMethod = button.dataset.authMethod;
+    document.querySelectorAll('[data-auth-method]').forEach((item) => {
+      const active = item === button;
+      item.classList.toggle('active', active);
+      item.setAttribute('aria-selected', String(active));
+    });
+    setFeedback(document.querySelector('#auth-feedback'));
+    showAuthPanel();
+  });
+});
+
+document.querySelectorAll('[data-register-method]').forEach((button) => {
+  button.addEventListener('click', () => {
+    currentRegisterMethod = button.dataset.registerMethod;
+    document.querySelectorAll('[data-register-method]').forEach((item) => {
+      const active = item === button;
+      item.classList.toggle('active', active);
+      item.setAttribute('aria-selected', String(active));
+    });
+    setFeedback(document.querySelector('#auth-feedback'));
+    showAuthPanel();
+  });
+});
+
 document.querySelectorAll('[data-close-modal]').forEach((button) => {
   button.addEventListener('click', () => closeModal(button.closest('dialog')));
 });
 
-document.querySelector('#auth-form').addEventListener('submit', (event) => {
+document.querySelector('#password-login-form').addEventListener('submit', async (event) => {
   event.preventDefault();
-  const name = document.querySelector('#auth-name').value.trim();
-  const email = document.querySelector('#auth-email').value.trim();
-  if (!name || !email) return;
-  const user = { name, email, createdAt: new Date().toISOString() };
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
-  window.dispatchEvent(new CustomEvent('viewpoint-agent-user-ready'));
-  if (!localStorage.getItem(MEMORY_KEY)) saveMemories(sampleMemories);
-  if (!localStorage.getItem(SESSION_KEY)) saveSessions(sampleSessions);
-  closeModal(authDialog);
-  showDashboard(user);
-  showToast('观点分身已创建，欢迎回来');
+  const button = event.currentTarget.querySelector('[type="submit"]');
+  const feedback = document.querySelector('#auth-feedback');
+  setFeedback(feedback);
+  setButtonBusy(button, true, '正在登录…');
+  try {
+    await signInWithPassword(
+      document.querySelector('#login-identifier').value,
+      document.querySelector('#login-password').value
+    );
+    await finishAccountAccess();
+  } catch (error) {
+    setFeedback(feedback, friendlyAuthError(error));
+  } finally {
+    setButtonBusy(button, false);
+  }
 });
+
+async function sendSmsLoginCode() {
+  const phone = requireMainlandPhone(document.querySelector('#sms-login-phone').value);
+  pendingVerifications.smsLogin = await beginSmsSignIn(phone);
+  document.querySelector('#sms-login-code-row').hidden = false;
+  document.querySelector('#sms-login-code').required = true;
+  document.querySelector('#sms-login-submit').textContent = '验证并登录';
+  document.querySelector('#sms-login-submit').dataset.defaultLabel = '验证并登录';
+  startResendCountdown(document.querySelector('#sms-login-resend'));
+  setFeedback(document.querySelector('#auth-feedback'), '验证码已发送，请查看手机短信。', 'success');
+}
+
+document.querySelector('#sms-login-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = document.querySelector('#sms-login-submit');
+  const feedback = document.querySelector('#auth-feedback');
+  setFeedback(feedback);
+  setButtonBusy(button, true, pendingVerifications.smsLogin ? '正在验证…' : '正在发送…');
+  try {
+    if (!pendingVerifications.smsLogin) await sendSmsLoginCode();
+    else {
+      const code = document.querySelector('#sms-login-code').value.trim();
+      if (!code) throw new Error('请输入短信验证码。');
+      await completeOtpVerification(pendingVerifications.smsLogin, code);
+      pendingVerifications.smsLogin = null;
+      await finishAccountAccess('', '手机号验证成功');
+    }
+  } catch (error) {
+    setFeedback(feedback, friendlyAuthError(error));
+  } finally {
+    setButtonBusy(button, false);
+  }
+});
+
+document.querySelector('#sms-login-resend').addEventListener('click', async () => {
+  const feedback = document.querySelector('#auth-feedback');
+  try {
+    pendingVerifications.smsLogin = null;
+    await sendSmsLoginCode();
+  } catch (error) {
+    setFeedback(feedback, friendlyAuthError(error));
+  }
+});
+
+async function handleRegistration(event, method) {
+  event.preventDefault();
+  const prefix = `${method}-register`;
+  const button = document.querySelector(`#${prefix}-submit`);
+  const feedback = document.querySelector('#auth-feedback');
+  const pendingKey = method === 'email' ? 'emailRegister' : 'phoneRegister';
+  setFeedback(feedback);
+  setButtonBusy(button, true, pendingVerifications[pendingKey] ? '正在验证…' : '正在发送…');
+
+  try {
+    const nickname = document.querySelector(`#${prefix}-nickname`).value.trim();
+    const username = requireUsername(document.querySelector(`#${prefix}-username`).value);
+    const password = document.querySelector(`#${prefix}-password`).value;
+    if (password.length < 8) throw new Error('密码至少需要 8 位。');
+
+    if (!pendingVerifications[pendingKey]) {
+      const credential = method === 'email'
+        ? { email: document.querySelector('#email-register-email').value.trim() }
+        : { phone: requireMainlandPhone(document.querySelector('#phone-register-phone').value) };
+      const verifyOtp = await beginRegistration({ ...credential, password, username });
+      pendingVerifications[pendingKey] = { verifyOtp, nickname };
+      document.querySelector(`#${prefix}-code-row`).hidden = false;
+      document.querySelector(`#${prefix}-code`).required = true;
+      button.textContent = '验证并完成注册';
+      button.dataset.defaultLabel = '验证并完成注册';
+      startResendCountdown(document.querySelector(`#${prefix}-resend`));
+      setFeedback(feedback, `验证码已发送到你的${method === 'email' ? '邮箱' : '手机'}。`, 'success');
+    } else {
+      const code = document.querySelector(`#${prefix}-code`).value.trim();
+      if (!code) throw new Error('请输入收到的验证码。');
+      const pending = pendingVerifications[pendingKey];
+      await completeOtpVerification(pending.verifyOtp, code);
+      pendingVerifications[pendingKey] = null;
+      await finishAccountAccess(pending.nickname, '账号创建成功');
+    }
+  } catch (error) {
+    setFeedback(feedback, friendlyAuthError(error));
+  } finally {
+    setButtonBusy(button, false);
+  }
+}
+
+document.querySelector('#email-register-form').addEventListener('submit', (event) => handleRegistration(event, 'email'));
+document.querySelector('#phone-register-form').addEventListener('submit', (event) => handleRegistration(event, 'phone'));
+
+async function resendRegistration(method) {
+  const pendingKey = method === 'email' ? 'emailRegister' : 'phoneRegister';
+  const codeInput = document.querySelector(`#${method}-register-code`);
+  pendingVerifications[pendingKey] = null;
+  // requestSubmit 会先执行浏览器表单校验；重发时暂时不要求填写旧验证码。
+  codeInput.required = false;
+  const form = document.querySelector(`#${method}-register-form`);
+  form.requestSubmit();
+  setTimeout(() => { codeInput.required = true; }, 0);
+}
+
+document.querySelector('#email-register-resend').addEventListener('click', () => resendRegistration('email'));
+document.querySelector('#phone-register-resend').addEventListener('click', () => resendRegistration('phone'));
 
 // ---------- 主导航与手动发起对话 ----------
 document.querySelectorAll('.nav-item').forEach((button) => {
@@ -488,16 +764,64 @@ document.querySelector('#install-extension').addEventListener('click', () => {
   openModal(extensionDialog);
 });
 
-document.querySelector('#profile-button').addEventListener('click', () => {
-  const shouldLogout = window.confirm('要退出当前原型账号并回到产品首页吗？');
+document.querySelector('#profile-button').addEventListener('click', async () => {
+  const shouldLogout = window.confirm('要退出当前账号并回到产品首页吗？');
   if (!shouldLogout) return;
-  localStorage.removeItem(USER_KEY);
-  showLanding();
+  try {
+    await signOutAccount();
+    localStorage.removeItem(USER_KEY);
+    showLanding();
+    showToast('已经安全退出登录');
+  } catch (error) {
+    showToast(friendlyAuthError(error));
+  }
+});
+
+document.querySelector('#bind-phone-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = document.querySelector('#bind-phone-submit');
+  const feedback = document.querySelector('#bind-phone-feedback');
+  setFeedback(feedback);
+  setButtonBusy(button, true, pendingVerifications.phoneBinding ? '正在验证…' : '正在发送…');
+
+  try {
+    if (!pendingVerifications.phoneBinding) {
+      const phone = requireMainlandPhone(document.querySelector('#bind-phone-number').value);
+      pendingVerifications.phoneBinding = await beginPhoneBinding(phone);
+      document.querySelector('#bind-phone-code-row').hidden = false;
+      document.querySelector('#bind-phone-code').required = true;
+      button.textContent = '验证并绑定';
+      button.dataset.defaultLabel = '验证并绑定';
+      setFeedback(feedback, '验证码已经发送，请查看手机短信。', 'success');
+    } else {
+      const code = document.querySelector('#bind-phone-code').value.trim();
+      if (!code) throw new Error('请输入短信验证码。');
+      await completeOtpVerification(pendingVerifications.phoneBinding, code);
+      pendingVerifications.phoneBinding = null;
+      const account = await getAuthenticatedAccount();
+      const user = toLocalProfile(account.user);
+      localStorage.setItem(USER_KEY, JSON.stringify(user));
+      closeModal(bindPhoneDialog);
+      updateUserUI(user);
+      renderOverview();
+      showToast('手机号绑定成功');
+    }
+  } catch (error) {
+    setFeedback(feedback, friendlyAuthError(error));
+  } finally {
+    setButtonBusy(button, false);
+  }
 });
 
 // ---------- 个人中心内的事件委托 ----------
 // 动态视图由 innerHTML 渲染，所以统一在稳定的 viewContainer 上监听点击。
 viewContainer.addEventListener('click', (event) => {
+  if (event.target.closest('[data-bind-phone]')) {
+    setFeedback(document.querySelector('#bind-phone-feedback'));
+    openModal(bindPhoneDialog);
+    return;
+  }
+
   const jump = event.target.closest('[data-jump-view]');
   if (jump) {
     renderView(jump.dataset.jumpView);
@@ -551,6 +875,10 @@ authDialog.addEventListener('click', (event) => {
   if (event.target === authDialog) closeModal(authDialog);
 });
 
+bindPhoneDialog.addEventListener('click', (event) => {
+  if (event.target === bindPhoneDialog) closeModal(bindPhoneDialog);
+});
+
 dialogueDialog.addEventListener('click', (event) => {
   if (event.target === dialogueDialog) closeModal(dialogueDialog);
 });
@@ -569,9 +897,28 @@ window.addEventListener('viewpoint-agent-extension-synced', () => {
 });
 
 // ---------- 页面启动入口 ----------
-// 有本地用户时直接进入个人中心；/dashboard 可用于无账号的演示预览。
-const user = getUser();
+// localStorage 只用于界面缓存；是否真正登录始终以 CloudBase getSession() 为准。
 const requestedView = new URLSearchParams(window.location.search).get('view') || 'overview';
-if (user) showDashboard(user, requestedView);
-else if (window.location.pathname === '/dashboard') showDashboard({ name: '体验用户' }, requestedView);
-else showLanding();
+
+async function bootstrapAccount() {
+  showLanding();
+  try {
+    const account = await getAuthenticatedAccount();
+    if (!account?.user) {
+      localStorage.removeItem(USER_KEY);
+      if (window.location.pathname === '/dashboard') openAuth('login');
+      return;
+    }
+    const user = toLocalProfile(account.user);
+    localStorage.setItem(USER_KEY, JSON.stringify(user));
+    seedLocalPrototypeData();
+    showDashboard(user, requestedView);
+  } catch (error) {
+    console.error('CloudBase 登录状态初始化失败：', error);
+    localStorage.removeItem(USER_KEY);
+    showLanding();
+    showToast(friendlyAuthError(error));
+  }
+}
+
+bootstrapAccount();

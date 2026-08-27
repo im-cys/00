@@ -7,22 +7,22 @@
  * 3. 提供 /api/health，便于部署平台检查服务是否在线；
  * 4. 为浏览器扩展提供规则型回答代理与观点整理接口。
  *
- * 当前不负责账户、数据库或真实模型请求。接入真实后端时，可保留接口形状，
- * 再用模型和数据库替换 generatePrototypeReply() 等原型函数。
+ * 账户登录由浏览器端 CloudBase Web SDK 负责；本服务器不接触用户密码或验证码。
+ * 数据库和真实模型尚未接入，可保留接口形状，再逐步替换原型函数。
  */
 
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 
-// 部署平台通常会注入 PORT；本地运行时默认使用 3000。
-const port = Number(process.env.PORT || 3000);
+// 部署平台通常会注入 PORT；VIEWPOINT_PORT 仅用于本地并行测试，避免占用已有服务。
+const port = Number(process.env.VIEWPOINT_PORT || process.env.PORT || 3000);
 const host = process.env.HOST || '0.0.0.0';
 
 // 只允许访问清单中的静态文件，避免把工作目录中的其他文件暴露出去。
 const staticFiles = new Map([
   ['/styles.css', { file: 'styles.css', type: 'text/css; charset=utf-8' }],
   ['/legal.css', { file: 'legal.css', type: 'text/css; charset=utf-8' }],
-  ['/app.js', { file: 'app.js', type: 'text/javascript; charset=utf-8' }],
+  ['/app.bundle.js', { file: 'app.bundle.js', type: 'text/javascript; charset=utf-8' }],
   ['/study.js', { file: 'study.js', type: 'text/javascript; charset=utf-8' }],
   ['/downloads/viewpoint-agent-extension.zip', { file: 'viewpoint-agent-extension.zip', type: 'application/zip' }]
 ]);
