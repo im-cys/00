@@ -1,27 +1,286 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <!--
+    index.html —— 产品首页与个人中心的页面骨架
+
+    这里只定义稳定的页面结构：产品介绍、侧边导航、顶部栏和弹窗容器。
+    个人中心各模块的具体内容由 app.js 动态写入 #view-container；
+    所有视觉样式统一放在 styles.css 中。
+  -->
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="观点分身——在真实问题中训练一个越来越像你的 AI 观点代理。">
+  <title>观点分身 · 让观点成为你的另一种身份</title>
+  <link rel="stylesheet" href="/styles.css?v=20260826-1">
+  <script src="/app.js?v=20260826-1" defer></script>
+</head>
 <body>
-  <h1>我的第一个网页</h1>
-  <p>这是知乎学习产品的第一个页面。</p>
+  <!-- 产品介绍首页：未注册用户首先看到的品牌、流程和数据边界说明。 -->
+  <div id="landing" class="landing-shell">
+    <header class="landing-nav">
+      <a class="brand" href="/" aria-label="观点分身首页">
+        <span class="brand-mark" aria-hidden="true"><span></span></span>
+        <span>观点分身</span>
+      </a>
+      <nav class="landing-links" aria-label="首页导航">
+        <a href="#how-it-works">如何工作</a>
+        <a href="#product-loop">产品能力</a>
+        <a href="#privacy">数据边界</a>
+      </nav>
+      <div class="landing-actions">
+        <button class="button button-ghost" type="button" data-auth-mode="login">登录</button>
+        <button class="button button-primary" type="button" data-auth-mode="register">创建我的代理</button>
+      </div>
+    </header>
 
-  <button id="load-data">从后端获取数据</button>
+    <main>
+      <section class="hero">
+        <div class="hero-copy">
+          <div class="eyebrow"><span></span> AI 观点代理 · 知乎场景</div>
+          <h1>让每一次讨论，<br><em>都更接近真正的你。</em></h1>
+          <p class="hero-description">和任何回答展开对话，在赞同、追问与反驳中沉淀自己的观点。你的每一次确认，都会让个人代理更懂你如何思考。</p>
+          <div class="hero-actions">
+            <button class="button button-primary button-large" type="button" data-auth-mode="register">免费训练我的代理</button>
+            <a class="button button-soft button-large" href="#how-it-works">看看它怎么工作 <span aria-hidden="true">↓</span></a>
+          </div>
+          <div class="hero-proof">
+            <div class="proof-avatars" aria-hidden="true">
+              <span class="mini-avatar coral"></span>
+              <span class="mini-avatar blue"></span>
+              <span class="mini-avatar lime"></span>
+              <span class="mini-avatar violet"></span>
+            </div>
+            <p><strong>不是替你说话</strong><span>而是帮你把想法说清楚</span></p>
+          </div>
+        </div>
 
-  <p id="result">还没有请求后端。</p>
+        <div class="hero-visual" aria-label="观点代理成长演示">
+          <div class="visual-glow"></div>
+          <div class="agent-stage">
+            <div class="agent-label label-top"><span>主题覆盖</span><strong>4 个领域</strong></div>
+            <div class="agent-label label-left"><span>表达还原度</span><strong>82%</strong></div>
+            <div class="agent-label label-right"><span>已确认观点</span><strong>18 条</strong></div>
+            <div class="agent-orb agent-orb-hero" aria-hidden="true">
+              <span class="orb-ring ring-one"></span>
+              <span class="orb-ring ring-two"></span>
+              <span class="orb-core"></span>
+              <span class="orb-spark spark-one"></span>
+              <span class="orb-spark spark-two"></span>
+            </div>
+            <div class="level-pill">L2 · 正在成形</div>
+          </div>
+          <article class="dialogue-preview preview-a">
+            <span class="preview-role">回答代理</span>
+            <p>你真正反对的，似乎不是远程办公本身，而是它把沟通成本转嫁给了个人。</p>
+          </article>
+          <article class="dialogue-preview preview-b">
+            <span class="preview-role user-role">你的观点</span>
+            <p>对，我更在意的是团队有没有为异步协作建立规则。</p>
+          </article>
+        </div>
+      </section>
 
-  <script>
-    const button = document.querySelector('#load-data');
-    const result = document.querySelector('#result');
+      <section id="how-it-works" class="section-block how-section">
+        <div class="section-heading">
+          <span class="section-kicker">一次真实问题，四步形成观点</span>
+          <h2>先和回答对话，再决定如何表达</h2>
+          <p>不用先完成性格测试。你的代理从一次次真实讨论和你的明确确认中成长。</p>
+        </div>
+        <div class="steps-grid">
+          <article class="step-card">
+            <span class="step-number">01</span>
+            <div class="step-icon">⌁</div>
+            <h3>选择一个回答</h3>
+            <p>在知乎页面点击悬浮球，选择真正引起你反应的回答。</p>
+          </article>
+          <article class="step-card">
+            <span class="step-number">02</span>
+            <div class="step-icon">◌</div>
+            <h3>与观点代理讨论</h3>
+            <p>赞同、追问、反驳或补充。AI 只围绕原回答的观点边界回应。</p>
+          </article>
+          <article class="step-card">
+            <span class="step-number">03</span>
+            <div class="step-icon">✦</div>
+            <h3>确认你的观点</h3>
+            <p>对话结束后逐条确认或修改，只有你认可的内容才进入长期记忆。</p>
+          </article>
+          <article class="step-card">
+            <span class="step-number">04</span>
+            <div class="step-icon">↗</div>
+            <h3>带走一份表达</h3>
+            <p>获得可以继续修改的评论或回答草稿，并由你亲自决定是否发布。</p>
+          </article>
+        </div>
+      </section>
 
-    button.addEventListener('click', async () => {
-      result.textContent = '正在请求后端……';
+      <section id="product-loop" class="section-block product-section">
+        <div class="product-copy">
+          <span class="section-kicker">不是通用聊天工具</span>
+          <h2>你的思考，会成为可以积累的个人资产</h2>
+          <p>每一条观点都保留来源、理由、边界和确认状态。你可以随时修改、冻结或删除。</p>
+          <ul class="feature-list">
+            <li><span>01</span><div><strong>观点记忆库</strong><p>看见自己在不同主题上的立场，以及观点如何发生变化。</p></div></li>
+            <li><span>02</span><div><strong>个人回答代理</strong><p>面对新问题，先看看“另一个我”可能怎样回答。</p></div></li>
+            <li><span>03</span><div><strong>创作草稿库</strong><p>保留 AI 初稿和你的终稿，理解代理在哪里还不像你。</p></div></li>
+          </ul>
+        </div>
+        <div class="memory-demo">
+          <div class="memory-demo-head">
+            <span>我的观点记忆</span>
+            <span class="live-dot">实时成长</span>
+          </div>
+          <article class="memory-item featured">
+            <span class="memory-topic">工作方式</span>
+            <h3>自由需要以清晰的协作边界为前提</h3>
+            <p>来自 3 次讨论 · 已由你确认</p>
+            <div class="confidence"><span style="width:82%"></span></div>
+          </article>
+          <article class="memory-item">
+            <span class="memory-topic">技术伦理</span>
+            <h3>工具效率不能替代人的最终判断</h3>
+            <p>来自 2 次讨论 · 2026-08-24 更新</p>
+          </article>
+          <article class="memory-item muted-memory">
+            <span class="memory-topic">待确认</span>
+            <h3>你可能更看重长期能力，而非短期结果</h3>
+            <div class="memory-actions"><button type="button">修改</button><button type="button" class="accept">确认</button></div>
+          </article>
+        </div>
+      </section>
 
-      try {
-        const response = await fetch('/api/hello');
-        const data = await response.json();
+      <section id="privacy" class="privacy-strip">
+        <div><span class="privacy-icon">◎</span><div><strong>由你控制的数字分身</strong><p>不偷偷定义你，只保存你亲自确认的观点。</p></div></div>
+        <div><span class="privacy-icon">⌁</span><div><strong>只读取主动选择的回答</strong><p>发送前展示内容，不扫描整页浏览记录。</p></div></div>
+        <div><span class="privacy-icon">✓</span><div><strong>发布按钮永远属于你</strong><p>AI 负责整理，最终表达由你审核和决定。</p></div></div>
+      </section>
 
-        result.textContent =
-          `${data.message}，服务器时间：${data.serverTime}`;
-      } catch (error) {
-        result.textContent = '请求后端失败。';
-      }
-    });
-  </script>
+      <section class="final-cta">
+        <div class="cta-orb agent-orb" aria-hidden="true"><span class="orb-core"></span></div>
+        <h2>从一次认真讨论开始，<br>训练一个真正属于你的代理。</h2>
+        <button class="button button-primary button-large" type="button" data-auth-mode="register">创建我的观点分身</button>
+      </section>
+    </main>
+
+    <footer class="landing-footer">
+      <a class="brand footer-brand" href="/"><span class="brand-mark"><span></span></span><span>观点分身</span></a>
+      <p>在真实问题中，认识自己的思考方式。</p>
+      <span>产品原型 · 2026</span>
+    </footer>
+  </div>
+
+  <!--
+    个人中心外壳：注册后显示。
+    左侧导航保持不变，右侧 #view-container 由 app.js 切换不同业务视图。
+  -->
+  <div id="dashboard" class="dashboard-shell" hidden>
+    <aside class="app-sidebar">
+      <a class="brand app-brand" href="/">
+        <span class="brand-mark" aria-hidden="true"><span></span></span>
+        <span>观点分身</span>
+      </a>
+      <nav class="app-nav" aria-label="个人中心导航">
+        <button class="nav-item active" type="button" data-view="overview"><span>⌂</span>概览</button>
+        <button class="nav-item" type="button" data-view="agent"><span>◉</span>我的代理</button>
+        <button class="nav-item" type="button" data-view="memories"><span>✦</span>观点记忆<span class="nav-count" id="memory-count">3</span></button>
+        <button class="nav-item" type="button" data-view="conversations"><span>◌</span>对话记录</button>
+        <button class="nav-item" type="button" data-view="drafts"><span>▤</span>创作草稿<span class="nav-count">2</span></button>
+      </nav>
+
+      <div class="sidebar-spacer"></div>
+      <article class="extension-card">
+        <span class="extension-icon">↗</span>
+        <strong>连接知乎场景</strong>
+        <p>安装扩展，在回答旁直接唤醒观点代理。</p>
+        <button class="button button-dark button-full" type="button" id="install-extension">安装浏览器扩展</button>
+      </article>
+
+      <button class="profile-button" id="profile-button" type="button">
+        <span class="profile-avatar" id="sidebar-avatar">玉</span>
+        <span><strong id="sidebar-name">体验用户</strong><small>个人设置</small></span>
+        <span class="profile-more">•••</span>
+      </button>
+    </aside>
+
+    <main class="app-main">
+      <header class="app-topbar">
+        <div>
+          <p class="topbar-date" id="today-label"></p>
+          <h1 id="view-title">下午好，<span id="welcome-name">体验用户</span></h1>
+        </div>
+        <div class="topbar-actions">
+          <button class="icon-button" type="button" aria-label="搜索">⌕</button>
+          <button class="icon-button notification-button" type="button" aria-label="通知">◔<span></span></button>
+          <button class="button button-primary" type="button" id="new-dialogue">＋ 发起观点对话</button>
+        </div>
+      </header>
+
+      <div id="view-container" class="view-container" aria-live="polite"></div>
+    </main>
+  </div>
+
+  <!-- 原型注册/登录弹窗：当前只把演示用户保存在 localStorage。 -->
+  <dialog id="auth-dialog" class="modal auth-modal">
+    <button class="modal-close" type="button" data-close-modal aria-label="关闭">×</button>
+    <div class="modal-orb agent-orb" aria-hidden="true"><span class="orb-core"></span></div>
+    <span class="section-kicker" id="auth-kicker">开始建立你的观点档案</span>
+    <h2 id="auth-title">创建我的观点分身</h2>
+    <p id="auth-description">先用一个名字进入原型。之后的每条长期记忆仍需由你亲自确认。</p>
+    <form id="auth-form">
+      <label>怎么称呼你<input id="auth-name" name="name" placeholder="例如：小玉" maxlength="20" required></label>
+      <label>邮箱<input id="auth-email" name="email" type="email" placeholder="name@example.com" required></label>
+      <button class="button button-primary button-full button-large" type="submit" id="auth-submit">进入个人中心</button>
+    </form>
+    <small>这是交互原型，不会向邮箱发送邮件。</small>
+  </dialog>
+
+  <!--
+    手动发起观点对话：在浏览器扩展完成前，用户可粘贴问题与回答创建会话。
+    提交后由 app.js 保存会话并跳转到 study.html。
+  -->
+  <dialog id="dialogue-dialog" class="modal dialogue-modal">
+    <button class="modal-close" type="button" data-close-modal aria-label="关闭">×</button>
+    <span class="section-kicker">手动导入 · 插件上线前的体验入口</span>
+    <h2>选择一个想讨论的回答</h2>
+    <p>粘贴问题和回答，系统会创建一个只基于这些内容的回答代理。</p>
+    <form id="dialogue-form">
+      <label>问题标题<input id="dialogue-question" placeholder="例如：远程办公会成为未来的主流吗？" required></label>
+      <label>回答作者（可选）<input id="dialogue-author" placeholder="知乎用户"></label>
+      <label>回答内容<textarea id="dialogue-answer" rows="7" placeholder="粘贴你想继续讨论的回答……" required></textarea></label>
+      <div class="modal-actions">
+        <button class="button button-soft" type="button" data-close-modal>取消</button>
+        <button class="button button-primary" type="submit">创建回答代理</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!--
+    浏览器禁止网页静默安装扩展。测试版采用“下载 ZIP + 加载解压目录”；
+    正式上架后，可把下载按钮替换为 Chrome Web Store 和 Edge Add-ons 链接。
+  -->
+  <dialog id="extension-dialog" class="modal extension-install-modal">
+    <button class="modal-close" type="button" data-close-modal aria-label="关闭">×</button>
+    <span class="section-kicker">浏览器扩展 · 测试版</span>
+    <h2>把观点分身带到浏览器</h2>
+    <p>Chrome 和 Edge 使用同一套 Manifest V3 扩展。测试阶段需要手动加载，正式上架商店后可以一键跳转安装。</p>
+    <div class="browser-install-grid">
+      <article><strong>Chrome</strong><span>打开 chrome://extensions/，开启开发者模式，然后加载解压后的 extension 文件夹。</span></article>
+      <article><strong>Microsoft Edge</strong><span>打开 edge://extensions/，开启开发人员模式，然后加载解压后的 extension 文件夹。</span></article>
+    </div>
+    <ol class="install-steps">
+      <li>下载测试版 ZIP 并解压。</li>
+      <li>在扩展管理页选择“加载已解压的扩展程序”。</li>
+      <li>选择解压后的 <code>extension</code> 文件夹，刷新已打开的网页。</li>
+    </ol>
+    <div class="modal-actions">
+      <button class="button button-soft" type="button" data-close-modal>稍后安装</button>
+      <a class="button button-primary" href="/downloads/viewpoint-agent-extension.zip" download>下载测试版 ZIP</a>
+    </div>
+    <small>浏览器安全机制不允许网页绕过确认静默安装扩展。</small>
+  </dialog>
+
+  <!-- 全站轻量操作提示，由 app.js 的 showToast() 控制。 -->
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </body>
+</html>

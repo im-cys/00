@@ -1,6 +1,7 @@
 {
-  "name": "zhihu-learning-demo",
+  "name": "viewpoint-agent-prototype",
   "version": "1.0.0",
+  "description": "观点分身独立网页交互原型",
   "private": true,
   "type": "module",
   "scripts": {

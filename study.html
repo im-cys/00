@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <!--
+    study.html —— 单次“回答代理对话”的页面骨架
+
+    页面分为三栏：左侧原回答来源、中间对话、右侧观点线索。
+    具体会话数据、消息发送和观点整理逻辑由 study.js 负责；
+    样式继续复用全站 styles.css。
+  -->
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="与回答代理展开观点对话。">
+  <title>回答代理对话 · 观点分身</title>
+  <link rel="stylesheet" href="/styles.css?v=20260826-1">
+  <script src="/study.js?v=20260826-1" defer></script>
+</head>
+<body class="conversation-page">
+  <!-- 顶部栏：返回个人中心、查看原回答、结束并整理观点。 -->
+  <header class="conversation-topbar">
+    <a class="brand" href="/?view=conversations">
+      <span class="brand-mark" aria-hidden="true"><span></span></span>
+      <span>观点分身</span>
+    </a>
+    <div class="conversation-title-wrap">
+      <span class="source-badge">回答代理</span>
+      <strong id="page-question">正在读取问题……</strong>
+    </div>
+    <div class="conversation-top-actions">
+      <button class="button button-soft" id="toggle-source" type="button">查看原回答</button>
+      <button class="button button-primary" id="finish-dialogue" type="button">结束并整理观点</button>
+    </div>
+  </header>
+
+  <main class="conversation-layout">
+    <!-- 左栏：明确本次代理依据的原问题、作者和回答内容。 -->
+    <aside class="source-panel" id="source-panel">
+      <div class="source-panel-head">
+        <span class="source-badge">对话来源</span>
+        <button class="source-close" id="source-close" type="button" aria-label="关闭原回答">×</button>
+      </div>
+      <h1 id="source-question">问题标题</h1>
+      <div class="source-author">
+        <span class="source-avatar" id="source-avatar">知</span>
+        <div><strong id="source-author">知乎用户</strong><small>原回答作者 · 公开内容快照</small></div>
+      </div>
+      <article class="source-answer" id="source-answer"></article>
+      <div class="source-boundary">
+        <strong>代理边界</strong>
+        <p>回答代理只依据这段公开内容回应。它不是原作者本人，推演内容会明确标识。</p>
+      </div>
+    </aside>
+
+    <!-- 中栏：首次引导、对话消息和输入框。 -->
+    <section class="chat-workspace">
+      <div class="chat-intro" id="chat-intro">
+        <div class="agent-orb chat-agent-orb" aria-hidden="true"><span class="orb-ring ring-one"></span><span class="orb-core"></span></div>
+        <span class="section-kicker">回答观点已经就位</span>
+        <h2>你想从哪里开始？</h2>
+        <p>不需要先组织成完整论证。先说出你最赞同、最困惑或最想反驳的地方。</p>
+        <div class="prompt-chips">
+          <button type="button" data-prompt="先用三句话概括这篇回答的核心立场。">概括核心立场</button>
+          <button type="button" data-prompt="我基本赞同，但我觉得其中有一个前提没有说清楚。">我赞同，但……</button>
+          <button type="button" data-prompt="我不同意这个结论，请先问我为什么。">我想反驳</button>
+          <button type="button" data-prompt="请找出这个回答里最值得继续追问的地方。">继续追问</button>
+        </div>
+      </div>
+
+      <div class="messages" id="messages" aria-live="polite"></div>
+
+      <div class="composer-wrap">
+        <form class="conversation-composer" id="conversation-form">
+          <textarea id="conversation-input" rows="1" placeholder="说说你的真实想法……" maxlength="1200"></textarea>
+          <div class="composer-footer">
+            <span id="input-counter">0 / 1200</span>
+            <button class="composer-send" type="submit" aria-label="发送">↑</button>
+          </div>
+        </form>
+        <p class="composer-hint">AI 生成内容仅供讨论；公开发布前请由你本人审核。</p>
+      </div>
+    </section>
+
+    <!-- 右栏：只整理本轮观点线索，不会自动保存为长期记忆。 -->
+    <aside class="insight-panel">
+      <div class="insight-panel-head">
+        <span>本轮观点线索</span>
+        <span class="live-dot">实时整理</span>
+      </div>
+      <div class="insight-empty" id="insight-empty">
+        <span>✦</span>
+        <p>开始对话后，这里会逐渐出现你的观点、理由和真正的分歧。</p>
+      </div>
+      <div id="insight-content" hidden>
+        <article class="insight-card"><span>你的倾向</span><p id="insight-stance">正在理解……</p></article>
+        <article class="insight-card"><span>可能的分歧</span><p id="insight-difference">还需要更多表达</p></article>
+        <article class="insight-card soft"><span>提醒</span><p>这些只是本轮对话线索，不会自动写入长期记忆。</p></article>
+      </div>
+      <div class="agent-growth-mini">
+        <div class="mini-growth-head"><span>代理理解度</span><strong id="understanding-value">0%</strong></div>
+        <div class="topic-bar-line"><span id="understanding-bar" style="width:0%"></span></div>
+      </div>
+    </aside>
+  </main>
+
+  <!--
+    对话成果弹窗：用户可修改候选观点、复制回复，并选择是否写入长期记忆。
+  -->
+  <dialog id="summary-dialog" class="modal summary-modal">
+    <button class="modal-close" type="button" id="summary-close" aria-label="关闭">×</button>
+    <span class="section-kicker">本次讨论成果</span>
+    <h2>你的观点开始清晰了</h2>
+    <p>以下内容是根据本轮表达整理的候选记忆，请由你决定是否保存。</p>
+    <article class="summary-memory">
+      <span class="memory-topic">待确认观点</span>
+      <textarea id="summary-claim" rows="3"></textarea>
+      <small>你可以在确认前继续修改。</small>
+    </article>
+    <article class="summary-draft">
+      <div><span class="memory-topic">可带走的回复</span><button type="button" id="copy-draft">复制</button></div>
+      <p id="reply-draft"></p>
+    </article>
+    <div class="summary-actions">
+      <button class="button button-soft" id="save-conversation-only" type="button">只保存对话</button>
+      <button class="button button-primary" id="confirm-memory" type="button">确认观点并完成</button>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
