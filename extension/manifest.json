@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "观点分身 · 回答讨论助手",
+  "version": "0.4.0",
+  "description": "主动选择知乎回答，与回答代理讨论并整理自己的观点和回复草稿。非知乎官方产品。",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://zhihu-social-demo-302050-11-1344805741.sh.run.tcloudbase.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "打开观点分身",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "overlay.css"
+      ],
+      "matches": [
+        "https://*/*"
+      ]
+    }
+  ]
+}
