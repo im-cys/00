@@ -21,6 +21,7 @@ const host = process.env.HOST || '0.0.0.0';
 // 只允许访问清单中的静态文件，避免把工作目录中的其他文件暴露出去。
 const staticFiles = new Map([
   ['/styles.css', { file: 'styles.css', type: 'text/css; charset=utf-8' }],
+  ['/legal.css', { file: 'legal.css', type: 'text/css; charset=utf-8' }],
   ['/app.js', { file: 'app.js', type: 'text/javascript; charset=utf-8' }],
   ['/study.js', { file: 'study.js', type: 'text/javascript; charset=utf-8' }],
   ['/downloads/viewpoint-agent-extension.zip', { file: 'viewpoint-agent-extension.zip', type: 'application/zip' }]
@@ -176,6 +177,17 @@ const server = http.createServer(async (request, response) => {
   // 产品首页与个人中心共用 index.html，由 app.js 决定显示哪一层。
   if (url.pathname === '/' || url.pathname === '/dashboard') {
     await sendFile(response, 'index.html', 'text/html; charset=utf-8');
+    return;
+  }
+
+  // Edge 商店及扩展首次使用说明引用的公开政策页面。
+  if (url.pathname === '/privacy') {
+    await sendFile(response, 'privacy.html', 'text/html; charset=utf-8');
+    return;
+  }
+
+  if (url.pathname === '/support') {
+    await sendFile(response, 'support.html', 'text/html; charset=utf-8');
     return;
   }
 
