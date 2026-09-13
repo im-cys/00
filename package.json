@@ -1,0 +1,14 @@
+{
+  "name": "answer-collision-prototype",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server/server.mjs",
+    "test": "node --test scripts/collision.test.mjs",
+    "import:maps": "node scripts/import-maps.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

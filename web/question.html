@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="知乎问题详情模拟页，用于体验问题探索地图插件。">
+  <title>知乎模拟站 · 问题</title>
+  <link rel="stylesheet" href="/web/vendor/katex/katex.min.css">
+  <link rel="stylesheet" href="/web/styles.css">
+  <link rel="stylesheet" href="/web/collision.css">
+</head>
+<body data-page="question">
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="zh-logo" href="/" aria-label="知乎首页">知乎</a>
+      <nav class="main-nav" aria-label="主导航"><a href="#">关注</a><a href="/">推荐</a><a href="#">热榜</a><a href="#">专栏</a><a href="#">圈子</a><a href="#">AI Works <sup>Beta</sup></a></nav>
+      <label class="search"><span class="sr-only">搜索</span><input placeholder="搜索问题和答案" aria-label="搜索"><button type="button" aria-label="提交搜索">⌕</button></label>
+      <button class="zhida" type="button">◐ 直答</button>
+      <button class="auth-button" id="authButton" type="button">知乎登录</button>
+    </div>
+  </header>
+  <section id="questionHeader" class="question-header"></section>
+  <main class="page-shell question-layout">
+    <section class="answers-column">
+      <div class="answer-count card" id="answerCount"></div>
+      <div id="answers"></div>
+    </section>
+  </main>
+  <script src="/web/vendor/katex/katex.min.js"></script>
+  <script src="/content/data.js"></script>
+  <script src="/web/site.js"></script>
+  <script src="/content/collision-maps.js"></script>
+  <script src="/web/collision-core.js"></script>
+  <script src="/web/collision.js"></script>
+</body>
+</html>

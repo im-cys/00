@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="知乎推荐页模拟站，用于体验问题探索地图插件。">
+  <title>知乎模拟站 · 首页</title>
+  <link rel="stylesheet" href="/web/styles.css">
+  <link rel="stylesheet" href="/web/collision.css">
+</head>
+<body data-page="home">
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="zh-logo" href="/" aria-label="知乎首页">知乎</a>
+      <nav class="main-nav" aria-label="主导航">
+        <a href="#">关注</a><a class="active" href="/">推荐</a><a href="#">热榜</a><a href="#">专栏</a><a href="#">圈子</a><a href="#">AI Works <sup>Beta</sup></a>
+      </nav>
+      <label class="search"><span class="sr-only">搜索</span><input placeholder="搜索你感兴趣的问题" aria-label="搜索"><button type="button" aria-label="提交搜索">⌕</button></label>
+      <button class="zhida" type="button">◐ 直答</button>
+      <button class="auth-button" id="authButton" type="button">知乎登录</button>
+    </div>
+  </header>
+  <main class="page-shell home-layout">
+    <section class="feed-column" aria-label="推荐内容">
+      <section id="feed" class="feed card" aria-live="polite"></section>
+    </section>
+    <aside class="right-column">
+      <section class="trends heat-board card"><header><div><strong>🔥 试用问题热度榜</strong><small>点赞、地图、收藏、评论累计</small></div></header><ol id="trends"></ol></section>
+      <p class="demo-note">此页为本地功能演示，与知乎官方无关。</p>
+    </aside>
+  </main>
+  <script src="/content/data.js"></script>
+  <script src="/web/site.js"></script>
+  <script src="/content/collision-maps.js"></script>
+  <script src="/web/collision-core.js"></script>
+  <script src="/web/collision.js"></script>
+</body>
+</html>
