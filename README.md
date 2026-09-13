@@ -1,6 +1,6 @@
 # 回答节点碰撞试用站
 
-这是一个把同一问题下的不同回答拆成观点节点、对照节点并生成新问题的前端试用项目。网页、Node 服务、Python 抽取与碰撞代码已统一放在本目录，不再依赖两个旧代码子项目。
+这是一个把同一问题下的不同回答拆成观点节点、对照节点并生成新问题的试用项目。Node 后端通过 CloudBase SDK 使用 PostgreSQL；Python 服务调用 OpenAI 兼容模型生成结构图与碰撞问题。
 
 ## 目录
 
@@ -10,6 +10,8 @@
 ├─ server/              Node 静态服务、登录和互动接口
 ├─ extractor/           节点抽取、证据回查与碰撞服务
 ├─ scripts/             启停、测试和私有结构图导入
+├─ database/            PostgreSQL 建表脚本
+├─ docs/                CloudBase 部署清单
 ├─ private-data/        本地私有内容（被 Git 忽略）
 ├─ .env.example         配置模板
 └─ package.json
@@ -41,16 +43,7 @@ python extractor/check_config.py
 1. `PRIVATE_DATA_DIR/data.js`，不存在时使用空白内容；
 2. `PRIVATE_DATA_DIR/collision-maps.js`，不存在时使用空白节点图。
 
-部署时请通过服务器文件复制、挂载目录或私有制品发布流程，把本机的 `private-data/data.js` 单独放到服务器。例如把它放在 `/srv/answer-collision-private/data.js`，并配置：
-
-```dotenv
-HOST=0.0.0.0
-ALLOWED_HOSTS=example.com,www.example.com
-ALLOWED_ORIGINS=https://example.com
-PRIVATE_DATA_DIR=/srv/answer-collision-private
-```
-
-这样 GitHub 仓库不含摘录正文，部署后的网页仍能从服务器私有目录显示内容。不要把 `private-data` 复制进公开镜像层或公开构建产物；若使用容器，优先以只读 volume 挂载。
+云端不再依赖容器内文件。部署后运行 `npm run import:data`，私有内容会通过带令牌的 HTTPS 接口写入 PostgreSQL。GitHub 仓库、Docker 镜像和构建日志均不包含正文。完整步骤见 [`docs/CLOUDBASE_DEPLOY.md`](docs/CLOUDBASE_DEPLOY.md)。
 
 ## 重新生成真实节点数据
 

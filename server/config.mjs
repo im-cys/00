@@ -24,18 +24,23 @@ export async function configuration() {
     allowedHosts: String(env.ALLOWED_HOSTS || '127.0.0.1,localhost').split(',').map(value => value.trim().toLowerCase()).filter(Boolean),
     allowedOrigins: String(env.ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean),
     collideBase: env.COLLIDE_BASE || 'http://127.0.0.1:3311',
+    useDatabase: String(env.CLOUDBASE_USE_DATABASE ?? 'false').toLowerCase() === 'true',
+    cloudbaseEnv: env.CLOUDBASE_ENV_ID || '',
+    dataImportToken: env.DATA_IMPORT_TOKEN || '',
+    aiModel: env.EXTRACT_MODEL || 'deepseek-v4-pro',
     privateDataDir,
     collisionDataDir: isAbsolute(collisionDataSetting) ? resolve(collisionDataSetting) : resolve(privateDataDir, collisionDataSetting),
     zhihuAuth: {
-      configured: Boolean(env.ZHIHU_CLIENT_ID && env.ZHIHU_CLIENT_SECRET && env.ZHIHU_AUTHORIZATION_URL && env.ZHIHU_TOKEN_URL && env.ZHIHU_PROFILE_URL),
-      demoMode: String(env.ZHIHU_AUTH_DEMO_MODE ?? 'true').toLowerCase() !== 'false',
-      clientId: env.ZHIHU_CLIENT_ID || '',
-      clientSecret: env.ZHIHU_CLIENT_SECRET || '',
-      authorizationUrl: env.ZHIHU_AUTHORIZATION_URL || '',
-      tokenUrl: env.ZHIHU_TOKEN_URL || '',
-      profileUrl: env.ZHIHU_PROFILE_URL || '',
-      redirectUri: env.ZHIHU_REDIRECT_URI || 'http://127.0.0.1:3210/auth/zhihu/callback',
-      scope: env.ZHIHU_SCOPE || 'openid profile'
+      configured: Boolean((env.ZHIHU_OAUTH_APP_ID || env.ZHIHU_CLIENT_ID) && (env.ZHIHU_OAUTH_APP_KEY || env.ZHIHU_CLIENT_SECRET)),
+      demoMode: String(env.ZHIHU_AUTH_DEMO_MODE ?? 'false').toLowerCase() === 'true',
+      appId: env.ZHIHU_OAUTH_APP_ID || env.ZHIHU_CLIENT_ID || '',
+      appKey: env.ZHIHU_OAUTH_APP_KEY || env.ZHIHU_CLIENT_SECRET || '',
+      accessSecret: env.ZHIHU_ACCESS_SECRET || '',
+      authorizationUrl: env.ZHIHU_AUTHORIZATION_URL || 'https://openapi.zhihu.com/authorize',
+      tokenUrl: env.ZHIHU_TOKEN_URL || 'https://openapi.zhihu.com/access_token',
+      profileUrl: env.ZHIHU_PROFILE_URL || 'https://openapi.zhihu.com/user',
+      redirectUri: env.ZHIHU_OAUTH_REDIRECT_URI || env.ZHIHU_REDIRECT_URI || 'http://127.0.0.1:3210/auth/zhihu/callback',
+      scope: env.ZHIHU_SCOPE || ''
     }
   };
 }

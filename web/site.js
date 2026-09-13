@@ -330,6 +330,7 @@
 
   window.ZhihuDemoCommunity = {
     requireAccount: startLogin,
+    isAuthenticated() { return Boolean(community.session.user); },
     currentUser() {
       const user = community.session.user;
       return user ? { id: user.id, name: user.name } : { id: 'local-guest', name: '本地体验者' };

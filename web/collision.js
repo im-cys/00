@@ -17,7 +17,7 @@
   const paragraphsOf = answerId => answer(answerId)?.paragraphs?.filter(p => !p.includes('〔图片〕') && !p.includes('〔视频〕')) || [];
   const cut = (s, n = 46) => [...String(s || '')].slice(0, n).join('') + ([...String(s || '')].length > n ? '…' : '');
   const when = value => value ? new Date(value).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
-  const names = {draft:'私有草稿',pending:'待演示审核',returned:'已退回',published:'本地公开',withdrawn:'已撤回',hidden:'已下架',discarded:'已放弃'};
+  const names = {draft:'私有草稿',pending:'待审核',returned:'已退回',published:'已公开',withdrawn:'已撤回',hidden:'已下架',discarded:'已放弃'};
   const types = {claim:'观点',fact:'事实陈述',experience:'经验',method:'方法'};
   const actions = {contrast:'交锋',synthesize:'合流'};
   // 动作内化后，卡片上展示 AI 判定的关系类型；旧数据回退到动作名。
@@ -79,8 +79,8 @@
   const mapViews = new Map();
   const expandedDiscoveries = new Set();
   // 碰撞已接入真实模型链路（关系判定 + 提问 + evidence 回查），不再是模板规则。
-  // 但发布范围仍只在本浏览器，不会真的发到知乎，这一点必须如实说明。
-  const demoNote = '<div class="co-demo-note">本地交互演示 · 碰撞由真实模型链路生成，产出经 evidence 回原文校验；“公开”和评论仅保存在本浏览器，不会发布到知乎。</div>';
+  // “公开”是本站公开，不会自动发布到知乎。
+  const demoNote = '<div class="co-demo-note">本站功能试用 · 碰撞由 AI 生成并经 evidence 回原文校验；公开内容仅展示在本站，不会自动发布到知乎。</div>';
   function toast(message) { clearTimeout(toastTimer); toastEl.textContent=message; toastEl.hidden=false; toastTimer=setTimeout(()=>toastEl.hidden=true,4600); }
   function openModal(title, subtitle, body, footer='', wide=false, kind='') {
     if(!dialog.open)lastFocus=document.activeElement;
@@ -115,7 +115,7 @@
 
   /* ---------- 页面装饰：首页卡片、问题聚合条、回答关联区 ---------- */
   function insightCard(item,compact=false) {
-    return `<button class="co-feed-insight" data-co="detail" data-id="${esc(item.id)}">${icon('spark')}<strong>${esc(item.title)}</strong><span class="co-muted">本地公开 · ${tagOf(item)} · ${item.refs.map(r=>esc(answer(r.answerId)?.author)).join(' × ')} · ${countComments(item.id)} 条讨论${compact?'':'　查看发现 →'}</span></button>`;
+    return `<button class="co-feed-insight" data-co="detail" data-id="${esc(item.id)}">${icon('spark')}<strong>${esc(item.title)}</strong><span class="co-muted">本站公开 · ${tagOf(item)} · ${item.refs.map(r=>esc(answer(r.answerId)?.author)).join(' × ')} · ${countComments(item.id)} 条讨论${compact?'':'　查看发现 →'}</span></button>`;
   }
   function homeInsightPanel(items) {
     return `<section class="co-feed-discoveries" aria-label="公开节点生成的新问题">
@@ -246,18 +246,34 @@
     return {questionId:qid,selected,slots:[...new Set(slots)].concat([null,null]).slice(0,2),reader:selected.includes(stored.reader)?stored.reader:selected[0],groups:stored.groups||{},mobile:stored.mobile||'maps'};
   }
   function saveWorkspace(){if(wb){state.workspaces[wb.questionId]={...wb};persist();}}
-  function startWorkbench(){
+  async function startWorkbench(){
     if(!selection.size)return;
     selectedQuestion=qById(document.body.dataset.questionId)||selectedQuestion||questions[0];
     const previous=wb?.questionId===selectedQuestion.id?wb:workspace(selectedQuestion.id);
-    const ids=[...selection]; const slots=previous.slots.map(id=>ids.includes(id)?id:null);
+    const ids=[...selection];
+    const missing=ids.filter(id=>!maps[id]);
+    if(missing.length){
+      if(!window.ZhihuDemoCommunity?.isAuthenticated?.()){ window.ZhihuDemoCommunity?.requireAccount?.(); return; }
+      toast(`正在生成 ${missing.length} 篇回答的节点结构图；已有结果会直接复用。`);
+      try{
+        const generated=await Promise.all(missing.map(async answerId=>{
+          const response=await fetch('/api/maps/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({answerId})});
+          const result=await response.json();
+          if(response.status===401){window.ZhihuDemoCommunity?.requireAccount?.();throw new Error('请先登录。');}
+          if(!response.ok)throw new Error(result.error||'结构图生成失败。');
+          return result;
+        }));
+        generated.forEach(result=>{maps[result.answerId]=result.map;});
+      }catch(error){toast(error.message);return;}
+    }
+    const slots=previous.slots.map(id=>ids.includes(id)?id:null);
     const ready=ids.filter(id=>maps[id]);
     for(let i=0;i<2;i++)if(!slots[i])slots[i]=ready.find(id=>!slots.includes(id))||null;
     wb={...previous,questionId:selectedQuestion.id,selected:ids,slots,reader:ids.includes(previous.reader)?previous.reader:ids[0]};pair=[];
     selectMode=false;
     if(dialog.open)closeModal(true);
     saveWorkspace();decorate();renderWorkbench();
-    toast(ready.length?'节点已在右侧浮窗打开。蓝色“观点”节点可跨回答碰撞。':'所选回答暂无可用结构图，可先阅读原文。');
+    toast(ready.length?'节点已在右侧浮窗打开。蓝色“观点”节点可跨回答碰撞。':'所选回答暂无可用结构图。');
   }
 
   /* ---------- P05：原页上的右侧节点浮窗 ---------- */
@@ -275,6 +291,20 @@
     const startX=centerX+cardW/2,startY=centerY+cardH;
     const paths=points.map(({x,y})=>{const endX=x+cardW/2,endY=y,bendY=Math.max(startY+26,(startY+endY)/2);return `<path d="M ${startX} ${startY} C ${startX} ${bendY}, ${endX} ${bendY-18}, ${endX} ${endY}"/>`;}).join('');
     return `<div class="co-network" data-map-aid="${aid}" style="--canvas-w:${canvasW}px;--canvas-h:${canvasH}px;--node-w:${cardW}px;--node-h:${cardH}px"><svg class="co-network-lines" viewBox="0 0 ${canvasW} ${canvasH}" aria-hidden="true">${paths}</svg>${nodeCard(aid,thesis,`left:${centerX}px;top:${centerY}px`)}${points.map(({n,x,y})=>nodeCard(aid,n,`left:${x}px;top:${y}px`,groupOf(n))).join('')}</div>`;
+  }
+  async function loadPublicDiscoveries(){
+    const qid=document.body.dataset.questionId||'';
+    try{
+      const response=await fetch(`/api/discoveries${qid?`?questionId=${encodeURIComponent(qid)}`:''}`);
+      if(!response.ok)return;
+      const result=await response.json();
+      for(const item of result.items||[]){
+        const index=state.items.findIndex(existing=>existing.id===item.id||existing.pairKey===item.pairKey);
+        if(index>=0)state.items[index]=item;else state.items.push(item);
+      }
+      for(const [id,comments] of Object.entries(result.comments||{}))state.comments[id]=comments;
+      persist();decorate();if(wb)renderWorkbench();
+    }catch{/* 公共列表短暂不可用时仍允许阅读已加载页面 */}
   }
   function applyMapView(aid){
     const net=root.querySelector(`.co-network[data-map-aid="${CSS.escape(aid)}"]`),view=mapViews.get(aid)||{x:0,y:0,zoom:1};
@@ -377,9 +407,10 @@
     let data;
     try{
       const resp=await fetch('/api/collide',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({questionTitle:qById(wb.questionId)?.title||'',
+        body:JSON.stringify({questionId:wb.questionId,questionTitle:qById(wb.questionId)?.title||'',
           refs:refs.map(r=>({answerId:r.answerId,nodeId:r.nodeId}))})});
       data=await resp.json();
+      if(resp.status===401){window.ZhihuDemoCommunity?.requireAccount?.();return;}
     }catch(err){
       data={status:'blocked',reason:'无法连接碰撞服务。请确认「启动碰撞服务.cmd」正在运行。'};
     }
@@ -410,6 +441,13 @@
       original:{title:data.question,rationale:data.relation_text},
       revisions:[{number:1,origin:'ai_generated',editorId:null,title:data.question,rationale:data.relation_text,createdAt:now}],
       reviews:[{number:1,result:'passed',reviewer:'AI 复审',note:'evidence 全部可回原文定位',createdAt:now}]};
+    try{
+      const publish=await fetch('/api/discoveries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(item)});
+      const saved=await publish.json();
+      if(publish.status===401){window.ZhihuDemoCommunity?.requireAccount?.();return;}
+      if(!publish.ok)throw new Error(saved.error||'公开保存失败。');
+      Object.assign(item,saved.item||{});
+    }catch(error){showBlocked({reason:`AI 已生成结果，但保存到公共列表失败：${error.message}`});return;}
     state.items.unshift(item);
     state.jobs.unshift({id:jobId,kind:'collide',status:'succeeded',outcome:'published',createdAt:now,refs,action:collisionAction,resultRef:item.id});
     persist();pair=[];shelfTab='published';renderWorkbench();decorate();showDetail(item.id);
@@ -501,7 +539,7 @@
     const evidence=i.evidence||core.evidenceCheck(i.refs,node,paragraphsOf);
     openModal('审核这条发现',`审核演示 · 仅处理当前提交版本 v${i.revision}`,demoNote+
       `${selfReview?`<div class="co-warn-box">${icon('alert')}发起者与审核员是同一账号，本条将被记录为“演示自审”，公开详情中可见。</div>`:''}<h3 class="co-detail-title">${esc(i.title)}</h3><p class="co-detail-rationale" style="white-space:pre-wrap">${esc(i.rationale)}</p><p class="co-detail-limits">局限：${esc(i.limitations||'提交者未填写额外局限。')}</p>${sourceCards(i.refs,evidence)}<div class="co-note-box">请实际对照原文逐项检查。自动定位成功不免除人工核对；演示审核不等于事实认证。</div>${CHECKS.map(([key,text])=>`<label class="co-check"><input type="checkbox" data-review-check="${key}">${text}</label>`).join('')}<label class="co-field"><span>退回意见 <small>退回时必填</small></span><textarea id="co-review-note" rows="2" maxlength="300" placeholder="指出哪一处需要补充或改写"></textarea></label>`,
-      `<span class="co-muted">通过后出现在两篇来源回答下方</span><div class="co-row">${btn('退回修改','return-review','',`data-id="${i.id}" data-revision="${i.revision}"`)}${btn('通过并本地公开','approve-review','primary',`data-id="${i.id}" data-revision="${i.revision}" disabled`)}</div>`,false,'review');
+      `<span class="co-muted">通过后出现在两篇来源回答下方</span><div class="co-row">${btn('退回修改','return-review','',`data-id="${i.id}" data-revision="${i.revision}"`)}${btn('通过并本站公开','approve-review','primary',`data-id="${i.id}" data-revision="${i.revision}" disabled`)}</div>`,false,'review');
   }
   function review(id,revision,approve){
     const i=state.items.find(x=>x.id===id);
@@ -703,19 +741,25 @@
       const list=state.comments[id]||[];const c=list.find(x=>x.id===el.dataset.cid);
       if(!c||c.authorId!==me().id)return;
       if(!confirm('撤回这条评论？将保留占位，正文不再展示。'))return;
-      c.status='deleted_by_author';c.moderatedAt=Date.now();persist();decorate();showDetail(id);toast('评论已撤回，占位保留。');
+      try{const response=await fetch('/api/discoveries/comment/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({discoveryId:id,commentId:c.id,status:'withdrawn'})});const result=await response.json();if(!response.ok)throw new Error(result.error||'撤回失败。');}
+      catch(error){toast(error.message);return;}
+      c.status='withdrawn';c.moderatedAt=Date.now();persist();decorate();showDetail(id);toast('评论已撤回，占位保留。');
     }
     else if(act==='detail-explore'){const qid=el.dataset.qid;closeModal(true);if(wb?.questionId===qid)return;enterSelectMode(qid);}
     else if(act==='recall'||act==='withdraw'){
       const i=state.items.find(x=>x.id===id);if(!i)return;
       if(!confirm(act==='withdraw'?'撤回后，两个回答下都不再公开展示这条发现。继续吗？':'撤回到草稿后可以修改，继续吗？'))return;
+      if(act==='withdraw'){
+        try{const response=await fetch('/api/discoveries/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({discoveryId:id,status:'withdrawn'})});const result=await response.json();if(!response.ok)throw new Error(result.error||'撤回失败。');}
+        catch(error){toast(error.message);return;}
+      }
       Object.assign(i,core.transition(i,act==='withdraw'?'withdrawn':'draft'),act==='withdraw'?{withdrawnAt:Date.now()}:{});
       persist();closeModal(true);decorate();shelfTab=act==='withdraw'?'published':'draft';if(wb)renderWorkbench();
-      toast(act==='withdraw'?'已撤回本地公开。评论与审核记录仍保留在后台。':'已撤回到私有草稿。');
+      toast(act==='withdraw'?'已撤回本站公开。评论与审核记录仍保留在后台。':'已撤回到私有草稿。');
     }
     else if(act==='copy-link'){
       const i=itemById(id);const url=`${location.origin}/question/${i.questionId}?insight=${encodeURIComponent(id)}`;
-      try{await navigator.clipboard.writeText(url);toast('链接已复制；本地发现仅在同一浏览器、同一站点地址下可见。');}
+      try{await navigator.clipboard.writeText(url);toast('链接已复制；登录本站的其他用户也可以查看。');}
       catch{info('复制链接',url);}
     }
     else if(act==='follow'){const key=el.dataset.follow;state.follows=state.follows.includes(key)?state.follows.filter(x=>x!==key):[...state.follows,key];persist();paintFollow(el);toast('关注状态已在本浏览器保存。');}
@@ -763,19 +807,28 @@
       }
     }
   });
-  dialog.addEventListener('submit',event=>{
+  dialog.addEventListener('submit',async event=>{
     if(!event.target.matches('.co-comment-form'))return;
     event.preventDefault();
     const form=event.target,id=form.dataset.insight,text=form.elements.comment.value.trim();
     if(!text)return;
     if(core.size(text)>L.comment)return toast(`评论最多 ${L.comment} 字。`);
     if(itemById(id)?.status!=='published')return toast('这条发现已不可评论。');
+    if(!window.ZhihuDemoCommunity?.isAuthenticated?.()){window.ZhihuDemoCommunity?.requireAccount?.();return;}
+    let saved;
+    try{
+      const response=await fetch('/api/discoveries/comment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({discoveryId:id,text})});
+      const result=await response.json();
+      if(response.status===401){window.ZhihuDemoCommunity?.requireAccount?.();return;}
+      if(!response.ok)throw new Error(result.error||'评论保存失败。');
+      saved=result.item;
+    }catch(error){toast(error.message);return;}
     if(!Array.isArray(state.comments[id]))state.comments[id]=[];
-    state.comments[id].push({id:uid('cmt'),text,status:'visible',authorId:me().id,author:me().name,createdAt:Date.now()});
+    state.comments[id].push(saved);
     persist();
     if(form.dataset.inline){expandedDiscoveries.add(id);decorate();document.querySelector(`.co-discovery-item[data-insight-id="${CSS.escape(id)}"]`)?.scrollIntoView({block:'nearest'});}
     else {decorate();showDetail(id);dialog.querySelector('.co-comment-form')?.scrollIntoView({block:'end'});}
-    toast('评论已保存在本浏览器。');
+    toast('评论已公开保存在本站。');
   });
   root.addEventListener('dragstart',event=>{
     const ball=event.target.closest('.co-miniball');
@@ -887,6 +940,7 @@
   window.addEventListener('zhihu:render',decorate);
   window.ZhihuCollision={decorate};
   decorate();
+  loadPublicDiscoveries();
 
   // 用后端校正后的结构图覆盖静态快照，保证前端看到的节点与碰撞时用的原文同源。
   // 静态快照是构建期产物，后端启动时会用 quote 回原文重算归属与 offset。

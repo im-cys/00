@@ -37,7 +37,7 @@ sys.path.insert(0, str(HERE))
 from quote_locator import locate_quote          # noqa: E402
 from context_pack import build_context_pack     # noqa: E402
 from collide_engine import collide              # noqa: E402
-from run_extract import load_dotenv              # noqa: E402
+from run_extract import load_dotenv, extract_one, strip_internal  # noqa: E402
 
 # 私有内容与抽取产物均由环境变量或 private-data 目录提供，不进入 Git。
 PROJECT_ROOT = HERE.parent
@@ -299,37 +299,132 @@ def _find(aid, nid):
     return a, n
 
 
+def _map_node_to_backend(node, answer_id, source):
+    """把网页使用的 camelCase 节点恢复为碰撞管道使用的字段。"""
+    quote = node.get("quote") or ""
+    loc = locate_quote(source, quote, threshold=0.82) if quote else None
+    return {
+        "id": node.get("id"),
+        "answer_id": answer_id,
+        "group_id": node.get("group_id", node.get("groupId")),
+        "role": node.get("role"),
+        "claim_text": node.get("claim_text", node.get("text")),
+        "type": node.get("type"),
+        "polarity": node.get("polarity"),
+        "scope": node.get("scope"),
+        "quote": quote or None,
+        "char_offset": loc.start if loc else node.get("char_offset", node.get("charOffset")),
+        "grounded": bool(loc) if quote else False,
+    }
+
+
+def _context_answers(body):
+    answers = []
+    for context in body.get("answerContexts") or []:
+        answer_id = str(context.get("answerId") or "")
+        source = str(context.get("content") or "")
+        payload = context.get("map") or {}
+        groups = []
+        for group in payload.get("groups") or []:
+            groups.append({
+                **group,
+                "group_id": group.get("group_id", group.get("id", group.get("groupId"))),
+                "start_offset": group.get("start_offset", group.get("startOffset")),
+            })
+        nodes = [_map_node_to_backend(node, answer_id, source)
+                 for node in payload.get("nodes") or []]
+        answers.append({
+            "answer_id": answer_id,
+            "legacy_id": answer_id,
+            "author": context.get("author") or payload.get("author") or "",
+            "question": context.get("questionTitle") or "",
+            "groups": groups,
+            "nodes": nodes,
+            "source": source,
+        })
+    return answers
+
+
+def extract_map(body: dict) -> dict:
+    answer_id = str(body.get("answerId") or "")
+    content = str(body.get("content") or "")
+    if not answer_id or not content:
+        return {"error": "answerId 和 content 均为必填项"}
+    payload, report = extract_one({
+        "answer_id": answer_id,
+        "question": str(body.get("questionTitle") or ""),
+        "content": content,
+        "author": str(body.get("author") or ""),
+    }, verbose=False)
+    if not report.get("ok"):
+        return {"error": report.get("fatal") or "节点抽取未通过校验"}
+    payload = strip_internal(payload)
+    frontend = {
+        "answerId": answer_id,
+        "backendId": answer_id,
+        "legacyId": answer_id,
+        "mapping": "database_generated",
+        "author": body.get("author") or "",
+        "groups": payload.get("groups") or [],
+        "nodes": [{
+            "id": node.get("id"),
+            "groupId": node.get("group_id"),
+            "role": node.get("role"),
+            "text": node.get("claim_text"),
+            "type": node.get("type"),
+            "polarity": node.get("polarity"),
+            "scope": node.get("scope"),
+            "quote": node.get("quote"),
+            "charOffset": node.get("char_offset"),
+            "grounded": node.get("grounded"),
+        } for node in payload.get("nodes") or []],
+    }
+    return {"map": frontend, "report": report}
+
+
 def do_collide(body: dict) -> dict:
     """执行一次碰撞。入口层只做「明显不可碰」的校验（PRD §5.1 第 1 层，宽松）。"""
     refs = body.get("refs") or []
     if len(refs) != 2:
         return {"status": "blocked", "reason": "需要恰好两个节点"}
 
-    (a1, n1), (a2, n2) = [_find(from_fe(r.get("answerId")), r.get("nodeId")) for r in refs]
+    supplied = _context_answers(body)
+    if supplied:
+        by_id = {answer["answer_id"]: answer for answer in supplied}
+        pairs = []
+        for ref in refs:
+            answer = by_id.get(str(ref.get("answerId") or ""))
+            node = next((item for item in (answer or {}).get("nodes", [])
+                         if item.get("id") == ref.get("nodeId")), None)
+            pairs.append((answer, node))
+        (a1, n1), (a2, n2) = pairs
+    else:
+        (a1, n1), (a2, n2) = [_find(from_fe(r.get("answerId")), r.get("nodeId")) for r in refs]
     if not (a1 and n1 and a2 and n2):
         return {"status": "blocked", "reason": "节点不存在或未被抽取"}
     if a1["answer_id"] == a2["answer_id"]:
         return {"status": "blocked", "reason": "两个节点必须来自不同的回答"}
 
-    pa = build_context_pack(n1, _STORE["sources"][a1["answer_id"]], a1["groups"],
+    source_a = a1.get("source") or _STORE["sources"][a1["answer_id"]]
+    source_b = a2.get("source") or _STORE["sources"][a2["answer_id"]]
+    pa = build_context_pack(n1, source_a, a1["groups"],
                             author=a1["author"], all_nodes=a1["nodes"])
-    pb = build_context_pack(n2, _STORE["sources"][a2["answer_id"]], a2["groups"],
+    pb = build_context_pack(n2, source_b, a2["groups"],
                             author=a2["author"], all_nodes=a2["nodes"])
 
     title = body.get("questionTitle") or a1["question"] or ""
-    sources = {a1["answer_id"]: _STORE["sources"][a1["answer_id"]],
-               a2["answer_id"]: _STORE["sources"][a2["answer_id"]]}
+    sources = {a1["answer_id"]: source_a, a2["answer_id"]: source_b}
 
     result = collide(title, pa, pb, sources, verbose=False)
     result.pop("_raw", None)   # 原始输出不回传前端，避免泄露 prompt 细节
     # evidence 里的 answer_id 换成前端编号，便于前端直接定位到对应回答卡片
     for e in result.get("evidence_located", []):
         e["backend_answer_id"] = e.get("answer_id")
-        e["answer_id"] = to_fe(e.get("answer_id"))
+        e["answer_id"] = e.get("answer_id") if supplied else to_fe(e.get("answer_id"))
     result["refs"] = [
-        {"answerId": to_fe(a1["answer_id"]), "backendId": a1["answer_id"], "nodeId": n1.get("id"),
+        {"answerId": a1["answer_id"] if supplied else to_fe(a1["answer_id"]), "backendId": a1["answer_id"], "nodeId": n1.get("id"),
          "author": a1["author"], "claim": n1.get("claim_text"), "quote": n1.get("quote")},
-        {"answerId": to_fe(a2["answer_id"]), "backendId": a2["answer_id"], "nodeId": n2.get("id"),
+        {"answerId": a2["answer_id"] if supplied else to_fe(a2["answer_id"]), "backendId": a2["answer_id"], "nodeId": n2.get("id"),
          "author": a2["author"], "claim": n2.get("claim_text"), "quote": n2.get("quote")},
     ]
     return result
@@ -372,17 +467,18 @@ class Handler(BaseHTTPRequestHandler):
         self._json(404, {"error": "not found"})
 
     def do_POST(self):
-        if self.path != "/collide":
+        if self.path not in ("/collide", "/extract-map"):
             return self._json(404, {"error": "not found"})
         try:
             n = int(self.headers.get("Content-Length") or 0)
-            if n <= 0 or n > 20000:
+            if n <= 0 or n > 2 * 1024 * 1024:
                 return self._json(400, {"error": "请求体为空或过大"})
             body = json.loads(self.rfile.read(n).decode("utf-8"))
         except Exception as exc:
             return self._json(400, {"error": f"请求解析失败：{exc}"})
         try:
-            return self._json(200, do_collide(body))
+            result = extract_map(body) if self.path == "/extract-map" else do_collide(body)
+            return self._json(400 if result.get("error") else 200, result)
         except Exception as exc:
             # 兜底：任何异常都转成可渲染结构，前端不会拿到裸 500
             return self._json(200, {"status": "blocked", "reason": f"服务内部错误：{exc}"})

@@ -1,0 +1,12 @@
+.env
+private-data/
+runtime/
+logs/
+qa/
+node_modules/
+__pycache__/
+*.py[cod]
+*.zip
+*.log
+.box-agent/
+.box-agent-scratch/

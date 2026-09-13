@@ -5,10 +5,14 @@
   "type": "module",
   "scripts": {
     "start": "node server/server.mjs",
-    "test": "node --test scripts/collision.test.mjs",
-    "import:maps": "node scripts/import-maps.mjs"
+    "test": "node --test scripts/*.test.mjs",
+    "import:maps": "node scripts/import-maps.mjs",
+    "import:data": "node scripts/import-private-data.mjs"
   },
   "engines": {
     "node": ">=22"
+  },
+  "dependencies": {
+    "@cloudbase/js-sdk": "^3.9.3"
   }
 }
