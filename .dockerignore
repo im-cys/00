@@ -1,0 +1,17 @@
+# 第二道防线：即使有人从本机目录直接 docker build，也不把私有内容打进镜像层。
+# 正常情况下这些内容已被 .gitignore 拦在仓库外，不会出现在构建上下文里。
+
+.env
+private-data/
+runtime/
+logs/
+qa/
+node_modules/
+__pycache__/
+*.py[cod]
+*.zip
+*.log
+.git/
+.gitignore
+.box-agent/
+.box-agent-scratch/

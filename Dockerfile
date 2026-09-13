@@ -18,19 +18,22 @@ WORKDIR /app
 # 先只复制代码，私有内容（private-data）刻意不打包进镜像
 COPY . .
 
+# PORT 必须与云托管「服务配置 → 监听端口」一致，否则存活/就绪探针连不上，
+# 部署会以 Readiness/Liveness probe failed: connection refused 失败。
+# 当前云托管服务配置的是 3000，这里保持一致。
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
-    PORT=80 \
+    PORT=3000 \
     COLLIDE_HOST=127.0.0.1 \
     COLLIDE_BASE=http://127.0.0.1:3311 \
     PRIVATE_DATA_DIR=/app/private-data
 
 # 服务端有 Host 头白名单（server/config.mjs），默认只放行 127.0.0.1/localhost。
-# 云托管的访问域名事前不确定，不放开会直接返回 403 Host denied。
-# 介意的话，改成在云托管控制台把 ALLOWED_HOSTS 设为你绑定的实际域名。
+# 探针用容器内网 IP 直连，Host 头不是域名，不放开会被 403 拦掉。
 ENV ALLOWED_HOSTS=*
 
-EXPOSE 80
+EXPOSE 3000
 
-# Python 碰撞服务后台常驻，Node 服务用 exec 接管 PID 1 以正确接收停止信号
-CMD ["sh", "-c", "python3 extractor/collide_service.py --port 3311 & exec node server/server.mjs"]
+# Python 碰撞服务后台常驻，Node 服务用 exec 接管 PID 1 以正确接收停止信号。
+# 碰撞服务即使因缺少私有数据而异常退出，也不影响 Node 页面服务对外提供健康检查。
+CMD ["sh", "-c", "(python3 extractor/collide_service.py --port 3311 || echo '[warn] 碰撞服务未启动，页面服务继续运行') & exec node server/server.mjs"]
