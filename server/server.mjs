@@ -63,8 +63,8 @@ export function createServer(config, store) {
       const path = url.pathname;
 
       if (req.method === 'GET' && path === '/api/health') {
-        const databaseCredentialMode = config.cloudbaseSecretId && config.cloudbaseSecretKey ? 'secret-pair' : config.cloudbaseApiKey ? 'api-key' : 'none';
-        return send(res, 200, { ok: true, app: 'answer-collision', database: config.useDatabase, databaseCredentialConfigured: databaseCredentialMode !== 'none', databaseCredentialMode, model: config.aiModel });
+        const databaseCredentialMode = config.cloudbaseApiKey ? 'api-key' : config.cloudbaseSecretId && config.cloudbaseSecretKey ? 'secret-pair' : 'none';
+        return send(res, 200, { ok: true, app: 'answer-collision', database: config.useDatabase, databaseCredentialConfigured: Boolean(config.cloudbaseApiKey), databaseCredentialMode, model: config.aiModel });
       }
 
       if (req.method === 'POST' && path === '/api/admin/import') {

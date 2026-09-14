@@ -11,12 +11,16 @@ const toggleActions = new Set(['upvote', 'like', 'favorite']);
 
 export function createCloudbaseStore(config) {
   const env = config.cloudbaseEnv || cloudbase.SYMBOL_CURRENT_ENV;
+  const hasApiKey = Boolean(config.cloudbaseApiKey);
   const hasSecretPair = Boolean(config.cloudbaseSecretId && config.cloudbaseSecretKey);
   const app = cloudbase.init({
     env,
     timeout: 30000,
-    ...(hasSecretPair ? { secretId: config.cloudbaseSecretId, secretKey: config.cloudbaseSecretKey } : {}),
-    ...(!hasSecretPair && config.cloudbaseApiKey ? { accessKey: config.cloudbaseApiKey } : {})
+    // A PostgreSQL API Key carries the service_role claim. Tencent Cloud's
+    // SecretID/SecretKey authenticates management API calls but does not grant
+    // the PostgREST table role, so it is only a compatibility fallback here.
+    ...(hasApiKey ? { accessKey: config.cloudbaseApiKey } : {}),
+    ...(!hasApiKey && hasSecretPair ? { secretId: config.cloudbaseSecretId, secretKey: config.cloudbaseSecretKey } : {})
   });
   // The Node SDK calls this option `database`, but sends it as PostgREST's
   // Accept-Profile/Content-Profile header. It therefore represents the

@@ -20,6 +20,7 @@
 ```dotenv
 CLOUDBASE_USE_DATABASE=true
 CLOUDBASE_ENV_ID=<完整环境 ID>
+CLOUDBASE_APIKEY=<CloudBase PostgreSQL API Key，对应 service_role>
 CLOUDBASE_SECRETID=<腾讯云 SecretID>
 CLOUDBASE_SECRETKEY=<腾讯云 SecretKey>
 CLOUDBASE_DB_INSTANCE=default
@@ -38,7 +39,7 @@ DATA_IMPORT_TOKEN=<至少 32 字节的随机值>
 ALLOWED_HOSTS=*
 ```
 
-前三个 `CLOUDBASE_*` 变量与控制台“接入指引 → 后端框架 → Node.js”一致。`CLOUDBASE_DB_SCHEMA` 对应 PostgreSQL schema；控制台查询 `current_schema()` 为 `public` 时保持默认值即可。代码也兼容 `CLOUDBASE_APIKEY`，但密钥对存在时优先使用密钥对。所有服务端凭据都绝不能提交到 GitHub、发送到前端或出现在截图中。`ZHIHU_ACCESS_SECRET` 当前不参与登录，仅为后续调用知乎内容数据接口预留。
+`CLOUDBASE_SECRETID` / `CLOUDBASE_SECRETKEY` 与控制台“接入指引 → 后端框架 → Node.js”一致，用于腾讯云管理接口鉴权；PostgreSQL 表读写还必须配置准确命名的 `CLOUDBASE_APIKEY`，它对应数据库 `service_role`。代码在两者同时存在时优先使用数据库 API Key。`CLOUDBASE_DB_SCHEMA` 对应 PostgreSQL schema；控制台查询 `current_schema()` 为 `public` 时保持默认值即可。所有服务端凭据都绝不能提交到 GitHub、发送到前端或出现在截图中。`ZHIHU_ACCESS_SECRET` 当前不参与登录，仅为后续调用知乎内容数据接口预留。
 
 `DATA_IMPORT_TOKEN` 可在本机 PowerShell 生成：
 
