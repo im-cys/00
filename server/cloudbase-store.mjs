@@ -1,4 +1,4 @@
-import cloudbase from '@cloudbase/js-sdk';
+import cloudbase from '@cloudbase/node-sdk';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 const hash = value => createHash('sha256').update(String(value)).digest('hex');

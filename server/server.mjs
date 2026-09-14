@@ -70,14 +70,19 @@ export function createServer(config, store) {
         const input = await jsonBody(req, 25 * 1024 * 1024);
         if (!input.data?.questions || !Array.isArray(input.data.questions)) return send(res, 400, { error: 'data.questions 缺失。' });
         const contentHash = sha256(input.data);
-        await store.importDataset(input.data, contentHash);
-        let mapCount = 0;
-        for (const [answerId, payload] of Object.entries(input.maps || {})) {
-          const source = answerFrom(input.data, answerId);
-          await store.saveAnswerMap({ answerId, questionId: answerId.split('-')[0], payload, sourceHash: sha256(source?.content || ''), model: input.mapModel || 'imported', promptVersion: input.mapPromptVersion || 'imported-v1' });
-          mapCount++;
+        try {
+          await store.importDataset(input.data, contentHash);
+          let mapCount = 0;
+          for (const [answerId, payload] of Object.entries(input.maps || {})) {
+            const source = answerFrom(input.data, answerId);
+            await store.saveAnswerMap({ answerId, questionId: answerId.split('-')[0], payload, sourceHash: sha256(source?.content || ''), model: input.mapModel || 'imported', promptVersion: input.mapPromptVersion || 'imported-v1' });
+            mapCount++;
+          }
+          return send(res, 200, { ok: true, contentHash, questions: input.data.questions.length, maps: mapCount });
+        } catch (error) {
+          console.error('[import]', error);
+          return send(res, 500, { error: `私有数据导入失败：${String(error?.message || error).slice(0, 500)}` });
         }
-        return send(res, 200, { ok: true, contentHash, questions: input.data.questions.length, maps: mapCount });
       }
 
       if (req.method === 'GET' && path === '/api/auth/session') return send(res, 200, sessionInfo(await currentUser(req)));

@@ -113,3 +113,21 @@ test('受保护导入接口写入存储后，网页内容脚本从存储读取',
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('已通过令牌校验的导入请求返回可操作的数据库错误', async () => {
+  const store = { importDataset: async () => { throw new Error('permission denied for table private_datasets'); } };
+  const config = {
+    allowedHosts: ['127.0.0.1'], allowedOrigins: [], collideBase: 'http://127.0.0.1:3311', useDatabase: true, aiModel: 'deepseek-v4-pro', dataImportToken: 'test-import-token',
+    zhihuAuth: { configured: false, demoMode: false, redirectUri: 'http://127.0.0.1/callback' }
+  };
+  const server = createServer(config, store);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const { port } = server.address();
+    const response = await fetch(`http://127.0.0.1:${port}/api/admin/import`, {
+      method: 'POST', headers: { Authorization: 'Bearer test-import-token', 'Content-Type': 'application/json' }, body: JSON.stringify({ data: { questions: [] } })
+    });
+    assert.equal(response.status, 500);
+    assert.match((await response.json()).error, /permission denied for table private_datasets/);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
