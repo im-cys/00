@@ -24,6 +24,8 @@ test('优先识别知乎黑客松标准回调变量名', async () => {
     assert.equal(config.cloudbaseApiKey, 'server-api-key');
     assert.equal(config.cloudbaseSecretId, 'secret-id');
     assert.equal(config.cloudbaseSecretKey, 'secret-key');
+    assert.equal(config.cloudbaseDatabaseInstance, 'default');
+    assert.equal(config.cloudbaseDatabaseSchema, 'public');
   }
   finally {
     if (previous === undefined) delete process.env.ZHIHU_OAUTH_REDIRECT_URI; else process.env.ZHIHU_OAUTH_REDIRECT_URI = previous;

@@ -18,7 +18,13 @@ export function createCloudbaseStore(config) {
     ...(hasSecretPair ? { secretId: config.cloudbaseSecretId, secretKey: config.cloudbaseSecretKey } : {}),
     ...(!hasSecretPair && config.cloudbaseApiKey ? { accessKey: config.cloudbaseApiKey } : {})
   });
-  const db = app.rdb();
+  // The Node SDK calls this option `database`, but sends it as PostgREST's
+  // Accept-Profile/Content-Profile header. It therefore represents the
+  // PostgreSQL schema (normally `public`), not the CloudBase environment ID.
+  const db = app.rdb({
+    instance: config.cloudbaseDatabaseInstance || 'default',
+    database: config.cloudbaseDatabaseSchema || 'public'
+  });
 
   async function upsert(table, value, onConflict) {
     rows(await db.from(table).upsert(value, { onConflict }));

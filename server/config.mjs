@@ -29,6 +29,8 @@ export async function configuration() {
     cloudbaseApiKey: env.CLOUDBASE_APIKEY || '',
     cloudbaseSecretId: env.CLOUDBASE_SECRETID || '',
     cloudbaseSecretKey: env.CLOUDBASE_SECRETKEY || '',
+    cloudbaseDatabaseInstance: env.CLOUDBASE_DB_INSTANCE || 'default',
+    cloudbaseDatabaseSchema: env.CLOUDBASE_DB_SCHEMA || 'public',
     dataImportToken: env.DATA_IMPORT_TOKEN || '',
     aiModel: env.EXTRACT_MODEL || 'deepseek-v4-pro',
     privateDataDir,
