@@ -7,6 +7,7 @@ import { root, configuration } from './config.mjs';
 import { createStore } from './store.mjs';
 
 const PROMPT_VERSION = 'answer-tree-v2.8-node-explanation';
+const APP_RELEASE = '2026-09-15.2-map-generation';
 // v2：碰撞判定改为「零成本预检闸门 + 两步模型判定（关系判定带举证责任 → 提问）」。
 // 判定口径变了，旧缓存必须失效，否则同一对节点会继续命中 v1 的误判结果。
 const COLLISION_VERSION = 'collision-v5-question-detail';
@@ -170,7 +171,7 @@ export function createServer(config, store) {
 
       if (req.method === 'GET' && path === '/api/health') {
         const databaseCredentialMode = config.cloudbaseApiKey ? 'api-key' : config.cloudbaseSecretId && config.cloudbaseSecretKey ? 'secret-pair' : 'none';
-        return send(res, 200, { ok: true, app: 'answer-collision', answerMapSchema: ANSWER_MAP_SCHEMA, promptVersion: PROMPT_VERSION, database: config.useDatabase, databaseCredentialConfigured: Boolean(config.cloudbaseApiKey), databaseCredentialMode, model: config.aiModel, modelCredentialConfigured: Boolean(config.aiApiKeyConfigured) });
+        return send(res, 200, { ok: true, app: 'answer-collision', release: APP_RELEASE, answerMapSchema: ANSWER_MAP_SCHEMA, promptVersion: PROMPT_VERSION, database: config.useDatabase, databaseCredentialConfigured: Boolean(config.cloudbaseApiKey), databaseCredentialMode, model: config.aiModel, modelCredentialConfigured: Boolean(config.aiApiKeyConfigured) });
       }
 
       if (req.method === 'POST' && path === '/api/admin/import') {
