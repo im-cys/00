@@ -12,10 +12,7 @@
       if (!response.ok) throw new Error('session unavailable');
       const session = await response.json();
       if (session.user) { location.replace(returnTo); return; }
-      const hasZhihu = session.configured;
-      zhihuLogin.hidden = !hasZhihu;
-      unavailable.hidden = hasZhihu;
-      zhihuLogin.href = `/auth/zhihu?return_to=${encodeURIComponent(returnTo)}`;
+      location.replace(`/auth/zhihu?return_to=${encodeURIComponent(returnTo)}`);
     } catch {
       zhihuLogin.hidden = true;
       unavailable.textContent = '无法读取登录状态，请刷新页面重试。';

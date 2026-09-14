@@ -88,7 +88,7 @@ npm run import:data -- --url https://zhihu-social-demo-302050-11-1344805741.sh.r
 
 1. 打开 `/api/health`，确认 `database: true`、`model: deepseek-v4-pro`。
 2. 导入数据后刷新首页，确认不再显示“内容数据尚未配置”。
-3. 点击“知乎登录”，完成授权并回到原页面。
+3. 在退出登录状态下打开首页，浏览器应直接进入知乎授权；授权完成后回到原页面。
 4. 选择一篇无结构图的回答，确认页面先显示生成中，随后轮询取得结构图并写入 `answer_maps`。
 5. 碰撞同一对节点两次，确认第二次使用 `collision_cache`。
 6. 发布问题条目并评论，换浏览器打开后仍能看到，确认数据来自公共数据库而非 localStorage。

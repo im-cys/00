@@ -301,21 +301,24 @@
   }
 
   async function loadCommunity() {
-    try {
-      const response = await fetch('/api/community');
-      if (response.ok) community = await response.json();
-    } catch {}
+    const [communityResult, sessionResult] = await Promise.allSettled([
+      fetch('/api/community').then(async response => response.ok ? response.json() : Promise.reject(new Error(`community ${response.status}`))),
+      fetch('/api/auth/session').then(async response => response.ok ? response.json() : Promise.reject(new Error(`session ${response.status}`)))
+    ]);
+    if (communityResult.status === 'fulfilled') community = communityResult.value;
+    // 登录状态独立读取：社区统计接口偶发失败时，不能把它误报成“知乎登录未配置”。
+    if (sessionResult.status === 'fulfilled') community.session = sessionResult.value;
+    if (!community.session.user) {
+      location.replace(`/auth/zhihu?return_to=${encodeURIComponent(location.pathname + location.search)}`);
+      return;
+    }
     renderPage();
     showOnboardingIfNeeded();
   }
 
   function startLogin() {
     if (community.session.user) return true;
-    if (!community.session.configured) {
-      alert('知乎登录尚未配置。请先申请知乎授权应用并在服务端填写凭据。');
-      return false;
-    }
-    location.href = `/login?return_to=${encodeURIComponent(location.pathname + location.search)}`;
+    location.href = `/auth/zhihu?return_to=${encodeURIComponent(location.pathname + location.search)}`;
     return false;
   }
 

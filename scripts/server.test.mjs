@@ -155,7 +155,7 @@ test('知乎授权跳转使用官方 app_id 参数并把 state 绑定到浏览�
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
 
-test('未登录访问页面时先进入登录选择页，登录用户可直接进入', async () => {
+test('未登录访问业务页或旧登录地址时直接进入知乎授权，登录用户可直接进入', async () => {
   let loggedIn = false;
   const store = { session: async () => loggedIn ? { id: 'zhihu-test', name: '测试用户' } : null };
   const config = {
@@ -168,12 +168,10 @@ test('未登录访问页面时先进入登录选择页，登录用户可直接�
     const { port } = server.address(); const base = `http://127.0.0.1:${port}`;
     const guarded = await fetch(`${base}/question/10001?from=home`, { redirect: 'manual' });
     assert.equal(guarded.status, 302);
-    assert.equal(guarded.headers.get('location'), '/login?return_to=%2Fquestion%2F10001%3Ffrom%3Dhome');
-    const loginPage = await fetch(`${base}${guarded.headers.get('location')}`);
-    assert.equal(loginPage.status, 200);
-    const loginHtml = await loginPage.text();
-    assert.match(loginHtml, /使用知乎授权登录/);
-    assert.doesNotMatch(loginHtml, /创建账号|name="password"|临时测试入口/);
+    assert.equal(guarded.headers.get('location'), '/auth/zhihu?return_to=%2Fquestion%2F10001%3Ffrom%3Dhome');
+    const legacyLogin = await fetch(`${base}/login?return_to=%2Fquestion%2F10001`, { redirect: 'manual' });
+    assert.equal(legacyLogin.status, 302);
+    assert.equal(legacyLogin.headers.get('location'), '/auth/zhihu?return_to=%2Fquestion%2F10001');
     const asset = await fetch(`${base}/web/styles.css`, { redirect: 'manual' });
     assert.equal(asset.status, 200, '静态资源不能被登录守卫拦截');
     loggedIn = true;

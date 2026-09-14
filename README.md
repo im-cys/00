@@ -30,7 +30,7 @@
 
 ## 登录
 
-站点只支持知乎 OAuth 授权登录。服务端需要配置知乎开放平台的 AppID、AppKey、Access Secret 和回调地址，具体见 [`docs/CLOUDBASE_DEPLOY.md`](docs/CLOUDBASE_DEPLOY.md)。
+站点只支持知乎 OAuth 授权登录。未登录用户访问首页或问题页时会直接跳转知乎授权，不经过站内账号选择页。服务端需要配置知乎开放平台的 AppID、AppKey、Access Secret 和回调地址，具体见 [`docs/CLOUDBASE_DEPLOY.md`](docs/CLOUDBASE_DEPLOY.md)。
 
 每位用户按北京时间自然日最多发起 10 次碰撞；点击开始后即计次，失败、无结果和缓存命中也计入。线上部署本版本前需再次执行可重复运行的 [`database/schema.sql`](database/schema.sql)，创建每日碰撞计数表。
 
