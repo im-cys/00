@@ -634,6 +634,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(400 if result.get("error") else 200, result)
         except Exception as exc:
             # 兜底：任何异常都转成可渲染结构，前端不会拿到裸 500
+            if self.path == "/extract-map":
+                # Node 会把 error 分类成安全、可操作的提示；不能只返回 reason，
+                # 否则上游读不到真实失败原因，只能显示笼统的“结构图生成失败”。
+                return self._json(502, {"error": f"模型抽取失败：{exc}"})
             return self._json(200, {"status": "blocked", "reason": f"服务内部错误：{exc}"})
 
 

@@ -322,6 +322,12 @@ test('本地操作轨迹只记录定位字段，不写回答正文和密钥', as
 test('生成失败会区分模型网络、限流和观点树校验错误', () => {
   assert.match(publicMapError(new Error('WinError 10013')), /无法连接模型接口/);
   assert.match(publicMapError(new Error('HTTP 429 rate limit')), /拥塞或额度/);
+  assert.match(publicMapError(new Error('HTTP 401 invalid api key')), /API Key 无效/);
+  assert.match(publicMapError(new Error('缺少 EXTRACT_API_KEY')), /API Key 无效/);
+  assert.match(publicMapError(new Error('HTTP 402 insufficient balance')), /余额不足/);
+  assert.match(publicMapError(new Error('HTTP 404 model_not_found')), /模型名称或接口地址/);
+  assert.match(publicMapError(new Error('HTTP 400 invalid request: thinking')), /请求参数不兼容/);
+  assert.match(publicMapError(new Error('模型返回空 content')), /没有返回有效 JSON/);
   assert.match(publicMapError(new Error('观点树校验失败')), /没有通过新版观点树校验/);
   assert.match(publicMapError(new DOMException('The operation was aborted due to timeout', 'TimeoutError')), /超过 15 分钟/);
 });

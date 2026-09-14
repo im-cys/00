@@ -144,6 +144,14 @@ class RateLimited(Exception):
     """429 限流，调用方应退避后重试。"""
 
 
+class ModelRequestError(RuntimeError):
+    """请求配置、认证或余额错误；继续重试不会自行恢复。"""
+
+
+class TransientModelError(RuntimeError):
+    """网络或模型服务的临时错误，可以做少量重试。"""
+
+
 def call_llm(messages, temperature: float = 0.2, timeout: int = 180) -> str:
     import requests
 
@@ -160,10 +168,13 @@ def call_llm(messages, temperature: float = 0.2, timeout: int = 180) -> str:
         "messages": messages,
         "temperature": temperature,
         "response_format": {"type": "json_object"},
+        # DeepSeek 官方建议 JSON Output 显式设置合理上限，避免对象被截断。
+        "max_tokens": int(os.environ.get("EXTRACT_MAX_TOKENS", "16000")),
     }
-    # GLM 混合思考模型：不关思考链会直接 429（实测），且延迟高。
-    # 关闭后单次简单请求约 0.6s。非 GLM 模型不认识该字段，故按模型名判断。
-    if "glm" in model.lower():
+    # GLM 与 DeepSeek V4 都会默认/可能进入思考模式。观点树需要严格 JSON，
+    # 因此显式关闭思考，避免只返回 reasoning_content、空 content 或超长延迟。
+    model_lower = model.lower()
+    if "glm" in model_lower or "deepseek-v4" in model_lower:
         payload["thinking"] = {"type": "disabled"}
 
     resp = requests.post(
@@ -176,15 +187,24 @@ def call_llm(messages, temperature: float = 0.2, timeout: int = 180) -> str:
         raise RateLimited(resp.text[:200])
     if resp.status_code >= 400:
         # 带上响应体，否则 raise_for_status 只给状态码，排错很痛苦
-        raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:300]}")
-    data = resp.json()
+        message = f"HTTP {resp.status_code}: {resp.text[:300]}"
+        if resp.status_code in (408, 409, 425) or resp.status_code >= 500:
+            raise TransientModelError(message)
+        raise ModelRequestError(message)
     try:
-        return data["choices"][0]["message"]["content"]
+        data = resp.json()
+    except ValueError as exc:
+        raise TransientModelError(f"模型接口返回了非 JSON 响应: {resp.text[:200]}") from exc
+    try:
+        content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError):
-        raise RuntimeError(f"响应结构异常: {json.dumps(data, ensure_ascii=False)[:300]}")
+        raise TransientModelError(f"响应结构异常: {json.dumps(data, ensure_ascii=False)[:300]}")
+    if not content:
+        raise TransientModelError("模型返回空 content，未生成可解析的 JSON。")
+    return content
 
 
-def call_llm_resilient(messages, max_attempts: int = 12, verbose: bool = False) -> str:
+def call_llm_resilient(messages, max_attempts: int | None = None, verbose: bool = False) -> str:
     """针对免费档共享池的重试包装。
 
     实测结论（glm-4.7-flash 免费档）：
@@ -193,18 +213,28 @@ def call_llm_resilient(messages, max_attempts: int = 12, verbose: bool = False) 
     属于服务端共享池拥塞，不是本 Key 的频率配额。
     因此正确策略是「小间隔多次重试」，而不是拉长间隔。
     """
+    if max_attempts is None:
+        # GLM 免费共享池保留原有多次重试；付费 DeepSeek 默认仅试 3 次，减少额度浪费。
+        max_attempts = 12 if "glm" in get_config()["model"].lower() else 3
     last = None
     for i in range(max_attempts):
         try:
             return call_llm(messages)
         except RateLimited as e:
             last = e
+            if i + 1 >= max_attempts:
+                break
             wait = min(2.0 + i * 0.8, 8.0)     # 温和递增，不做指数退避
             if verbose:
                 print(f"\n      [429] 第 {i+1}/{max_attempts} 次，{wait:.1f}s 后重试", flush=True)
             time.sleep(wait)
+        except ModelRequestError:
+            # 400/401/402/403/404 等配置或账户问题不会通过重试恢复。
+            raise
         except Exception as e:
             last = e
+            if i + 1 >= max_attempts:
+                break
             wait = min(3.0 + i * 1.5, 12.0)
             if verbose:
                 print(f"\n      [ERR] {type(e).__name__}，{wait:.1f}s 后重试", flush=True)

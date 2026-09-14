@@ -45,8 +45,14 @@ function rawJsonId(text, key) {
 export function publicMapError(error) {
   const message = String(error?.message || error || '');
   if (/TimeoutError|aborted due to timeout|generation_timeout/i.test(message)) return '本次模型生成超过 15 分钟，任务已停止，请重新生成。';
+  if (/缺少 EXTRACT_API_KEY|HTTP 401|unauthorized|invalid.?api.?key|authentication/i.test(message)) return '模型 API Key 无效或未生效，请检查 EXTRACT_API_KEY 并更新服务。';
+  if (/HTTP 402|insufficient.?balance|余额不足|账户余额/i.test(message)) return 'DeepSeek 账户余额不足，请充值后重新生成。';
+  if (/HTTP 403|forbidden|permission denied/i.test(message)) return '当前 API Key 没有调用该模型的权限，请检查模型权限。';
+  if (/HTTP 404|model.?not.?found|unknown model/i.test(message)) return '模型名称或接口地址不正确，请检查 EXTRACT_MODEL 与 EXTRACT_BASE_URL。';
+  if (/HTTP 400|invalid.?request|thinking|response_format|max_tokens/i.test(message)) return '模型请求参数不兼容，请更新服务后重新生成。';
   if (/10013|Failed to establish a new connection|ECONNREFUSED|ENETUNREACH|fetch failed/i.test(message)) return '无法连接模型接口。请检查本机网络或代理权限后重新生成。';
   if (/429|rate.?limit|额度|拥塞/i.test(message)) return '模型接口当前拥塞或额度受限，请稍后重新生成。';
+  if (/空 content|empty content|非 JSON 响应|响应结构异常/i.test(message)) return '模型本次没有返回有效 JSON，系统已自动重试；请再次生成。';
   if (/JSON|校验|观点树|collision|support/i.test(message)) return '模型已返回内容，但没有通过新版观点树校验，请重新生成。';
   return '结构图生成失败，请稍后重试。';
 }
@@ -164,7 +170,7 @@ export function createServer(config, store) {
 
       if (req.method === 'GET' && path === '/api/health') {
         const databaseCredentialMode = config.cloudbaseApiKey ? 'api-key' : config.cloudbaseSecretId && config.cloudbaseSecretKey ? 'secret-pair' : 'none';
-        return send(res, 200, { ok: true, app: 'answer-collision', answerMapSchema: ANSWER_MAP_SCHEMA, promptVersion: PROMPT_VERSION, database: config.useDatabase, databaseCredentialConfigured: Boolean(config.cloudbaseApiKey), databaseCredentialMode, model: config.aiModel });
+        return send(res, 200, { ok: true, app: 'answer-collision', answerMapSchema: ANSWER_MAP_SCHEMA, promptVersion: PROMPT_VERSION, database: config.useDatabase, databaseCredentialConfigured: Boolean(config.cloudbaseApiKey), databaseCredentialMode, model: config.aiModel, modelCredentialConfigured: Boolean(config.aiApiKeyConfigured) });
       }
 
       if (req.method === 'POST' && path === '/api/admin/import') {

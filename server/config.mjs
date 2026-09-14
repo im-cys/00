@@ -34,6 +34,7 @@ export async function configuration() {
     cloudbaseDatabaseSchema: env.CLOUDBASE_DB_SCHEMA || 'public',
     dataImportToken: env.DATA_IMPORT_TOKEN || '',
     aiModel: env.EXTRACT_MODEL || 'deepseek-v4-pro',
+    aiApiKeyConfigured: Boolean(env.EXTRACT_API_KEY),
     // 临时真实环境多账号测试入口。测试结束后设为 false，再删除对应路由与表。
     testPasswordAuthEnabled: String(env.TEST_PASSWORD_AUTH_ENABLED ?? 'true').toLowerCase() === 'true',
     privateDataDir,
