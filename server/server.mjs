@@ -62,7 +62,7 @@ export function createServer(config, store) {
       const url = new URL(req.url, 'http://127.0.0.1');
       const path = url.pathname;
 
-      if (req.method === 'GET' && path === '/api/health') return send(res, 200, { ok: true, app: 'answer-collision', database: config.useDatabase, model: config.aiModel });
+      if (req.method === 'GET' && path === '/api/health') return send(res, 200, { ok: true, app: 'answer-collision', database: config.useDatabase, databaseCredentialConfigured: Boolean(config.cloudbaseApiKey), model: config.aiModel });
 
       if (req.method === 'POST' && path === '/api/admin/import') {
         const supplied = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');

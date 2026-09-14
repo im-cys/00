@@ -26,6 +26,7 @@ export async function configuration() {
     collideBase: env.COLLIDE_BASE || 'http://127.0.0.1:3311',
     useDatabase: String(env.CLOUDBASE_USE_DATABASE ?? 'false').toLowerCase() === 'true',
     cloudbaseEnv: env.CLOUDBASE_ENV_ID || '',
+    cloudbaseApiKey: env.CLOUDBASE_APIKEY || '',
     dataImportToken: env.DATA_IMPORT_TOKEN || '',
     aiModel: env.EXTRACT_MODEL || 'deepseek-v4-pro',
     privateDataDir,
