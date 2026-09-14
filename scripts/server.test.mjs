@@ -328,6 +328,8 @@ test('生成失败会区分模型网络、限流和观点树校验错误', () =>
   assert.match(publicMapError(new Error('HTTP 404 model_not_found')), /模型名称或接口地址/);
   assert.match(publicMapError(new Error('HTTP 400 invalid request: thinking')), /请求参数不兼容/);
   assert.match(publicMapError(new Error('模型返回空 content')), /没有返回有效 JSON/);
+  assert.match(publicMapError(new Error('display_text 不是完整短总结')), /观点树校验/);
+  assert.match(publicMapError(new Error('HTTPSConnectionPool: Read timed out')), /无法连接模型接口/);
   assert.match(publicMapError(new Error('观点树校验失败')), /没有通过新版观点树校验/);
   assert.match(publicMapError(new DOMException('The operation was aborted due to timeout', 'TimeoutError')), /超过 15 分钟/);
 });

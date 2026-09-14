@@ -132,9 +132,9 @@ def _clean_statement(value: Any, limit: int, rep: Report) -> str:
 def _normalize_display_text(value: Any, statement: str, rep: Report) -> str:
     """结构图卡片的完整短总结。
 
-    新结果只要给出 display_text，就必须是可独立成立的判断；不再用
-    「截到硬上限」掩盖模型输出问题。缺字段时的 statement 回退仅用于
-    兼容旧 fixture / 旧缓存；新 prompt 会强制每层输出。
+    display_text 只影响卡片展示，不能因为一个短标题瑕疵让整棵观点树和
+    已定位的原文依据作废。模型输出不合格时做确定性清洗并记录修复；
+    完整 statement 仍保留在详情页，不会丢失观点语义。
     """
     given = str(value or "").strip().strip("。.；;，, ")
     if not given:
@@ -158,8 +158,28 @@ def _normalize_display_text(value: Any, statement: str, rep: Report) -> str:
         if not _DISPLAY_JUDGMENT.search(text):
             problems.append("没有明确判断")
         if problems:
-            rep.ok = False
-            rep.fatal = f"display_text 不是完整短总结（{'、'.join(problems)}）"
+            before = text
+            # 常见失败是模型在短标题末尾留下“因此/但是”等连接词；先去掉它，
+            # 再优先选 statement 中 32 字以内、能独立成立的完整分句。
+            text = re.sub(r"[，,：:；;]?(?:因此|所以|但是|但|而且|并且|因为|以及|同时|从而)$", "", text).strip()
+            candidates = [text]
+            clean_statement = str(statement or "").strip().strip("。.；;，, ")
+            candidates.append(clean_statement)
+            candidates.extend(
+                part.strip() for part in re.split(r"[。！？!?；;]", clean_statement)
+                if part.strip()
+            )
+            chosen = next((candidate for candidate in candidates
+                           if MIN_DISPLAY_TEXT_LEN <= len(candidate) <= MAX_DISPLAY_TEXT_LEN
+                           and not _DISPLAY_INCOMPLETE_END.search(candidate)
+                           and _DISPLAY_JUDGMENT.search(candidate)), "")
+            if not chosen:
+                chosen = (clean_statement or text or before)[:MAX_DISPLAY_TEXT_LEN]
+                chosen = re.sub(r"[，,：:；;]?(?:因此|所以|但是|但|而且|并且|因为|以及|同时|从而)$", "", chosen).strip("，,：:；; ")
+            text = chosen or before[:MAX_DISPLAY_TEXT_LEN]
+            rep.fix("display_text 不合格，已生成兼容短总结", {
+                "before": before, "after": text, "problems": problems,
+            })
     return text or statement[:MAX_DISPLAY_TEXT_LEN]
 
 

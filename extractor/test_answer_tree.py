@@ -210,8 +210,8 @@ class AnswerTreeTest(unittest.TestCase):
         self.assertTrue(report.ok)
         self.assertLessEqual(len(payload["nodes"][0]["explanation"]), MAX_EXPLANATION_LEN)
 
-    def test_incomplete_display_text_rejects_the_generated_tree(self):
-        """已给出的 display_text 如果是长句节选，应触发重新生成而不是前端截断。"""
+    def test_incomplete_display_text_is_repaired_without_discarding_tree(self):
+        """短标题是展示字段，残留连接词时应修复，不能浪费整次模型生成。"""
         raw = {
             "root": {
                 "kind": "root",
@@ -224,9 +224,10 @@ class AnswerTreeTest(unittest.TestCase):
             },
             "boundaries": [],
         }
-        _, report = normalize(raw, self.source, "q6_bad_display", "大学什么专业最好？")
-        self.assertFalse(report.ok)
-        self.assertIn("display_text 不是完整短总结", report.fatal)
+        payload, report = normalize(raw, self.source, "q6_bad_display", "大学什么专业最好？")
+        self.assertTrue(report.ok)
+        self.assertEqual(payload["tree"]["display_text"], "城市条件比专业选择更能决定结果")
+        self.assertTrue(any("display_text 不合格" in item["reason"] for item in report.fixed))
 
     def test_structured_semantics_are_normalized(self):
         """axis / stance / conditions / excludes 落地，excludes 需原文排除表述。"""

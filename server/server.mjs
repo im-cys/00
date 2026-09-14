@@ -50,10 +50,10 @@ export function publicMapError(error) {
   if (/HTTP 403|forbidden|permission denied/i.test(message)) return '当前 API Key 没有调用该模型的权限，请检查模型权限。';
   if (/HTTP 404|model.?not.?found|unknown model/i.test(message)) return '模型名称或接口地址不正确，请检查 EXTRACT_MODEL 与 EXTRACT_BASE_URL。';
   if (/HTTP 400|invalid.?request|thinking|response_format|max_tokens/i.test(message)) return '模型请求参数不兼容，请更新服务后重新生成。';
-  if (/10013|Failed to establish a new connection|ECONNREFUSED|ENETUNREACH|fetch failed/i.test(message)) return '无法连接模型接口。请检查本机网络或代理权限后重新生成。';
+  if (/10013|Failed to establish a new connection|ECONNREFUSED|ENETUNREACH|fetch failed|HTTPSConnectionPool|Read timed out|ConnectTimeout|ConnectionError|ProxyError|SSLError|RemoteDisconnected|NameResolutionError|Temporary failure/i.test(message)) return '无法连接模型接口。请检查云服务公网访问和 DeepSeek 接口连通性后重新生成。';
   if (/429|rate.?limit|额度|拥塞/i.test(message)) return '模型接口当前拥塞或额度受限，请稍后重新生成。';
   if (/空 content|empty content|非 JSON 响应|响应结构异常/i.test(message)) return '模型本次没有返回有效 JSON，系统已自动重试；请再次生成。';
-  if (/JSON|校验|观点树|collision|support/i.test(message)) return '模型已返回内容，但没有通过新版观点树校验，请重新生成。';
+  if (/JSON|校验|观点树|collision|support|display_text|root|节点|叶子/i.test(message)) return '模型已返回内容，但没有通过新版观点树校验，请重新生成。';
   return '结构图生成失败，请稍后重试。';
 }
 
