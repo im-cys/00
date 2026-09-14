@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer as createHttpServer } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -147,4 +148,55 @@ test('已通过令牌校验的导入请求返回可操作的数据库错误', as
     assert.equal(response.status, 500);
     assert.match((await response.json()).error, /permission denied for table private_datasets/);
   } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test('结构图生成立即返回任务状态，并可轮询到实际生成结果', async () => {
+  let upstreamCalls = 0; let storedMap = null;
+  const upstream = createHttpServer(async (req, res) => {
+    if (req.method !== 'POST' || req.url !== '/extract-map') { res.writeHead(404).end(); return; }
+    upstreamCalls++;
+    const chunks = []; for await (const chunk of req) chunks.push(chunk);
+    const input = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    await new Promise(resolve => setTimeout(resolve, 120));
+    const body = JSON.stringify({ map: { answerId: input.answerId, groups: [], nodes: [{ id: 'n1', role: 'thesis', text: '测试观点' }] } });
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }); res.end(body);
+  });
+  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  const store = {
+    session: async () => ({ id: 'zhihu-test', name: '测试用户' }),
+    getDataset: async () => ({ payload: { questions: [{ id: '10001', title: '测试问题', answers: [{ id: '10001-01', author: '测试作者', paragraphs: ['回答正文'] }] }] } }),
+    getAnswerMap: async () => storedMap,
+    saveAnswerMap: async value => { storedMap = { ...value, source_hash: value.sourceHash, prompt_version: value.promptVersion }; },
+    act: async () => ({})
+  };
+  const config = {
+    allowedHosts: ['127.0.0.1'], allowedOrigins: [], collideBase: `http://127.0.0.1:${upstream.address().port}`, useDatabase: false, aiModel: 'deepseek-v4-pro',
+    zhihuAuth: { configured: false, demoMode: false, redirectUri: 'http://127.0.0.1/callback' }
+  };
+  const server = createServer(config, store);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const options = { method: 'POST', headers: { Cookie: 'qm_session=test', 'Content-Type': 'application/json' }, body: JSON.stringify({ answerId: '10001-01' }) };
+    const started = await fetch(`${base}/api/maps/generate`, options);
+    assert.equal(started.status, 202);
+    assert.deepEqual(await started.json(), { answerId: '10001-01', status: 'processing' });
+    const duplicate = await fetch(`${base}/api/maps/generate`, options);
+    assert.equal(duplicate.status, 202, '处理中重复请求不能再启动一次模型调用');
+    let finished;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 20));
+      finished = await fetch(`${base}/api/maps/generate?answerId=10001-01`, { headers: { Cookie: 'qm_session=test' } });
+      if (finished.status === 200) break;
+    }
+    assert.equal(finished.status, 200);
+    const result = await finished.json();
+    assert.equal(result.status, 'ready');
+    assert.equal(result.map.nodes[0].text, '测试观点');
+    assert.equal(upstreamCalls, 1);
+    assert.ok(storedMap, '实际生成结果必须写入存储');
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    await new Promise(resolve => upstream.close(resolve));
+  }
 });

@@ -121,3 +121,10 @@ test('回答浮窗支持关闭，最小化圆球支持右键删除菜单',()=>{
   assert.match(source,/addEventListener\('contextmenu'/);
   assert.match(source,/删除窗口/);
 });
+test('生成过程不暴露复用策略或底层 HTML 解析错误',()=>{
+  const source=readFileSync(new URL('../web/collision.js',import.meta.url),'utf8');
+  assert.doesNotMatch(source,/已有结果会直接复用/);
+  assert.doesNotMatch(source,/结构图来自已保存的抽取结果/);
+  assert.match(source,/async function apiJson/);
+  assert.match(source,/生成服务响应超时/);
+});

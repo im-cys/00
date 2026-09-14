@@ -1,5 +1,4 @@
-/* Local, explicitly labelled MVP prototype for the design in MVP页面流程与数据对象.md.
-   No model requests, no real Zhihu publication. All state lives in this browser. */
+/* MVP interaction layer for the design in MVP页面流程与数据对象.md. */
 (() => {
   'use strict';
   const questions = window.ZHIHU_DEMO_DATA?.questions || [];
@@ -16,6 +15,27 @@
   const node = ref => maps[ref?.answerId]?.nodes.find(n => n.id === ref.nodeId);
   const paragraphsOf = answerId => answer(answerId)?.paragraphs?.filter(p => !p.includes('〔图片〕') && !p.includes('〔视频〕')) || [];
   const cut = (s, n = 46) => [...String(s || '')].slice(0, n).join('') + ([...String(s || '')].length > n ? '…' : '');
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  async function apiJson(response, fallback = '服务暂时不可用，请稍后重试。') {
+    const text = await response.text();
+    try { return text ? JSON.parse(text) : {}; }
+    catch { throw new Error(fallback); }
+  }
+  async function generateMap(answerId) {
+    let response=await fetch('/api/maps/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({answerId})});
+    let result=await apiJson(response,'生成服务响应超时，请稍后重试。');
+    if(response.status===401){window.ZhihuDemoCommunity?.requireAccount?.();throw new Error('请先登录。');}
+    if(!response.ok&&response.status!==202)throw new Error(result.error||'结构图生成失败。');
+    for(let attempt=0;(response.status===202||result.status==='processing')&&attempt<180;attempt++){
+      await wait(2000);
+      response=await fetch(`/api/maps/generate?answerId=${encodeURIComponent(answerId)}`);
+      result=await apiJson(response,'无法读取生成进度，请稍后重试。');
+      if(response.status===401){window.ZhihuDemoCommunity?.requireAccount?.();throw new Error('请先登录。');}
+      if(!response.ok&&response.status!==202)throw new Error(result.error||'结构图生成失败。');
+    }
+    if(!result.map)throw new Error('生成等待超时，请稍后重试。');
+    return result;
+  }
   const when = value => value ? new Date(value).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
   const names = {draft:'私有草稿',pending:'待审核',returned:'已退回',published:'已公开',withdrawn:'已撤回',hidden:'已下架',discarded:'已放弃'};
   const types = {claim:'观点',fact:'事实陈述',experience:'经验',method:'方法'};
@@ -177,7 +197,7 @@
         const linked=items.filter(i=>i.refs.some(r=>r.answerId===aid));
         if(linked.length)card.insertAdjacentHTML('beforeend',`<section class="co-association co-root"><div class="co-between"><strong style="font-size:13px">${icon('spark')}由这篇回答参与形成的问题 · ${linked.length} 条</strong><span class="co-muted">点击展开</span></div><div class="co-discovery-list">${linked.map(i=>inlineDiscoveryItem(i,aid)).join('')}</div></section>`);
       });
-      if(!document.querySelector('.co-question-aside'))document.querySelector('.question-layout')?.insertAdjacentHTML('beforeend',`<aside class="co-question-aside co-root"><section class="co-side-card"><h3>也可以看看</h3><ul class="co-side-links">${questions.filter(x=>x.id!==qid).slice(0,4).map(x=>`<li><a href="/question/${x.id}">${esc(x.title)}</a></li>`).join('')}</ul></section><p class="co-side-note">知乎页面模拟 · 与知乎官方无关<br>结构图来自已保存的抽取结果；摘要不等于事实核查。</p></aside>`);
+      if(!document.querySelector('.co-question-aside'))document.querySelector('.question-layout')?.insertAdjacentHTML('beforeend',`<aside class="co-question-aside co-root"><section class="co-side-card"><h3>也可以看看</h3><ul class="co-side-links">${questions.filter(x=>x.id!==qid).slice(0,4).map(x=>`<li><a href="/question/${x.id}">${esc(x.title)}</a></li>`).join('')}</ul></section><p class="co-side-note">知乎页面模拟 · 与知乎官方无关</p></aside>`);
       focusLinkedDiscovery();
     }
     document.querySelectorAll('.answer-author>button:not([data-co])').forEach(b=>{b.dataset.co='follow';b.dataset.follow=b.closest('.AnswerItem').dataset.answerId;paintFollow(b);});
@@ -254,15 +274,9 @@
     const missing=ids.filter(id=>!maps[id]);
     if(missing.length){
       if(!window.ZhihuDemoCommunity?.isAuthenticated?.()){ window.ZhihuDemoCommunity?.requireAccount?.(); return; }
-      toast(`正在生成 ${missing.length} 篇回答的节点结构图；已有结果会直接复用。`);
+      toast(`正在生成 ${missing.length} 篇回答的节点结构图…`);
       try{
-        const generated=await Promise.all(missing.map(async answerId=>{
-          const response=await fetch('/api/maps/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({answerId})});
-          const result=await response.json();
-          if(response.status===401){window.ZhihuDemoCommunity?.requireAccount?.();throw new Error('请先登录。');}
-          if(!response.ok)throw new Error(result.error||'结构图生成失败。');
-          return result;
-        }));
+        const generated=await Promise.all(missing.map(generateMap));
         generated.forEach(result=>{maps[result.answerId]=result.map;});
       }catch(error){toast(error.message);return;}
     }

@@ -39,6 +39,7 @@ function rawJsonId(text, key) {
 
 export function createServer(config, store) {
   const collideBase = config.collideBase || 'http://127.0.0.1:3311';
+  const mapJobs = new Map();
   const files = new Map([
     ['/', 'web/index.html'], ['/question.html', 'web/question.html'], ['/web/site.js', 'web/site.js'],
     ['/web/styles.css', 'web/styles.css'], ['/web/collision.css', 'web/collision.css'], ['/web/collision.js', 'web/collision.js'], ['/web/collision-core.js', 'web/collision-core.js']
@@ -49,6 +50,40 @@ export function createServer(config, store) {
   const sessionInfo = user => ({ user, provider: 'zhihu', configured: Boolean(config.zhihuAuth?.configured), demoMode: Boolean(config.zhihuAuth?.demoMode) });
   const send = (res, status, data) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(data)); };
   const currentUser = req => store.session(cookies(req).qm_session);
+  const validStoredMap = async answerId => {
+    const dataset = datasetValue(await store.getDataset());
+    const source = answerFrom(dataset, answerId);
+    if (!source?.content) return { source: null, cached: null, sourceHash: '' };
+    const sourceHash = sha256(source.content);
+    const cached = await store.getAnswerMap(answerId);
+    const valid = cached && (cached.source_hash || cached.sourceHash) === sourceHash && cached.model === config.aiModel && (cached.prompt_version || cached.promptVersion) === PROMPT_VERSION;
+    return { source, cached: valid ? cached : null, sourceHash };
+  };
+  const startMapJob = ({ answerId, source, sourceHash, user }) => {
+    const job = { answerId, status: 'processing', startedAt: Date.now() };
+    mapJobs.set(answerId, job);
+    void (async () => {
+      try {
+        const upstream = await fetch(`${collideBase}/extract-map`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ answerId, questionTitle: source.question.title || '', content: source.content, author: source.answer.author || '' }),
+          signal: AbortSignal.timeout(300000)
+        });
+        const upstreamText = await upstream.text();
+        let result;
+        try { result = JSON.parse(upstreamText); }
+        catch { throw new Error(`抽取服务返回了非 JSON 响应（HTTP ${upstream.status}）。`); }
+        if (!upstream.ok || result.error || !result.map) throw new Error(result.error || '结构图生成失败。');
+        await store.saveAnswerMap({ answerId, questionId: answerId.split('-')[0], payload: result.map, sourceHash, model: config.aiModel, promptVersion: PROMPT_VERSION });
+        await store.act(user, { questionId: answerId.split('-')[0], answerId, action: 'map' });
+        Object.assign(job, { status: 'ready', map: result.map, finishedAt: Date.now() });
+      } catch (error) {
+        console.error(`[map:${answerId}]`, error);
+        Object.assign(job, { status: 'failed', error: '结构图生成失败，请稍后重试。', finishedAt: Date.now() });
+      }
+    })();
+    return job;
+  };
 
   return http.createServer(async (req, res) => {
     try {
@@ -178,18 +213,33 @@ export function createServer(config, store) {
       }
       if (req.method === 'GET' && path === '/api/collide/maps') return send(res, 200, { questionId: url.searchParams.get('qid') || '', answers: await store.getAnswerMaps(url.searchParams.get('qid') || '') });
 
+      if (req.method === 'GET' && path === '/api/maps/generate') {
+        const user = await currentUser(req); if (!user) return send(res, 401, { error: '请先使用知乎账号登录。' });
+        const answerId = String(url.searchParams.get('answerId') || '');
+        if (!answerId) return send(res, 400, { error: '回答编号不能为空。' });
+        const job = mapJobs.get(answerId);
+        if (job?.status === 'processing') return send(res, 202, { answerId, status: 'processing' });
+        if (job?.status === 'ready') return send(res, 200, { answerId, status: 'ready', map: job.map });
+        if (job?.status === 'failed') return send(res, 502, { answerId, status: 'failed', error: job.error });
+        const { cached } = await validStoredMap(answerId);
+        if (cached) return send(res, 200, { answerId, status: 'ready', map: cached.payload });
+        // 云托管可能把轮询分发到另一个实例；该实例看不到内存任务，但能在
+        // 任务完成后从数据库读到结果，因此在此期间继续返回处理中。
+        return send(res, 202, { answerId, status: 'processing' });
+      }
+
       if (req.method === 'POST' && path === '/api/maps/generate') {
         const user = await currentUser(req); if (!user) return send(res, 401, { error: '请先使用知乎账号登录。' });
         const input = await jsonBody(req); const answerId = String(input.answerId || '');
-        const dataset = datasetValue(await store.getDataset()); const source = answerFrom(dataset, answerId);
+        if (!answerId) return send(res, 400, { error: '回答编号不能为空。' });
+        const { source, cached, sourceHash } = await validStoredMap(answerId);
         if (!source?.content) return send(res, 404, { error: '没有找到这篇回答的私有正文。' });
-        const sourceHash = sha256(source.content); const cached = await store.getAnswerMap(answerId);
-        if (cached && (cached.source_hash || cached.sourceHash) === sourceHash && cached.model === config.aiModel && (cached.prompt_version || cached.promptVersion) === PROMPT_VERSION) return send(res, 200, { answerId, map: cached.payload, cacheHit: true });
-        const upstream = await fetch(`${collideBase}/extract-map`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answerId, questionTitle: source.question.title || '', content: source.content, author: source.answer.author || '' }), signal: AbortSignal.timeout(300000) });
-        const result = await upstream.json(); if (!upstream.ok || result.error) return send(res, 502, { error: result.error || '结构图生成失败。' });
-        await store.saveAnswerMap({ answerId, questionId: answerId.split('-')[0], payload: result.map, sourceHash, model: config.aiModel, promptVersion: PROMPT_VERSION });
-        await store.act(user, { questionId: answerId.split('-')[0], answerId, action: 'map' });
-        return send(res, 200, { answerId, map: result.map, cacheHit: false });
+        if (cached) return send(res, 200, { answerId, status: 'ready', map: cached.payload });
+        const existing = mapJobs.get(answerId);
+        if (existing?.status === 'processing') return send(res, 202, { answerId, status: 'processing' });
+        if (existing) mapJobs.delete(answerId);
+        startMapJob({ answerId, source, sourceHash, user });
+        return send(res, 202, { answerId, status: 'processing' });
       }
 
       if (req.method === 'POST' && path === '/api/collide') {
