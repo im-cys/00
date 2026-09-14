@@ -33,7 +33,6 @@ ZHIHU_OAUTH_APP_ID=<OAuth AppID>
 ZHIHU_OAUTH_APP_KEY=<OAuth AppKey>
 ZHIHU_ACCESS_SECRET=<Access Secret>
 ZHIHU_OAUTH_REDIRECT_URI=https://zhihu-social-demo-302050-11-1344805741.sh.run.tcloudbase.com/auth/zhihu/callback
-ZHIHU_AUTH_DEMO_MODE=false
 
 DATA_IMPORT_TOKEN=<至少 32 字节的随机值>
 ALLOWED_HOSTS=*
@@ -65,7 +64,7 @@ https://zhihu-social-demo-302050-11-1344805741.sh.run.tcloudbase.com/auth/zhihu/
 
 它必须与云托管环境变量 `ZHIHU_OAUTH_REDIRECT_URI` 完全一致，包括协议、域名、路径且不要多一个尾部 `/`。
 
-如果 AppID 和 AppKey 已配置，服务会优先执行真实 OAuth；`ZHIHU_AUTH_DEMO_MODE=true` 只是凭据缺失时的本地演示后备，不会覆盖正式登录。
+服务只支持真实的知乎 OAuth 授权登录；AppID、AppKey 或回调地址缺失时，登录页会直接提示配置不完整。
 
 ## 4. 部署后导入私有数据
 

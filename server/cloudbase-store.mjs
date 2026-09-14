@@ -1,6 +1,5 @@
 import cloudbase from '@cloudbase/node-sdk';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { createPasswordRecord, testUserId, validateTestCredentials, verifyPassword } from './test-auth.mjs';
 
 const hash = value => createHash('sha256').update(String(value)).digest('hex');
 const iso = value => new Date(value).toISOString();
@@ -59,29 +58,6 @@ export function createCloudbaseStore(config) {
     if (token) rows(await db.from('app_sessions').delete().eq('token_hash', hash(token)));
   }
 
-  async function registerTestUser(username, password) {
-    const credentials = validateTestCredentials(username, password);
-    const existing = rows(await db.from('test_accounts').select('user_id').eq('username_key', credentials.usernameKey).limit(1))[0];
-    if (existing) throw Object.assign(new Error('该用户名已存在，请直接登录。'), { status: 409 });
-    const user = { id: testUserId(credentials.usernameKey), name: credentials.username, avatar: '', provider: 'test-password' };
-    const passwordRecord = await createPasswordRecord(credentials.password);
-    await ensureUser(user);
-    rows(await db.from('test_accounts').insert({
-      username_key: credentials.usernameKey, username: credentials.username, user_id: user.id,
-      password_salt: passwordRecord.salt, password_hash: passwordRecord.passwordHash
-    }));
-    return user;
-  }
-
-  async function authenticateTestUser(username, password) {
-    const credentials = validateTestCredentials(username, password);
-    const account = rows(await db.from('test_accounts').select('username,user_id,password_salt,password_hash').eq('username_key', credentials.usernameKey).limit(1))[0];
-    if (!account || !await verifyPassword(credentials.password, account.password_salt, account.password_hash)) {
-      throw Object.assign(new Error('用户名或密码不正确。'), { status: 401 });
-    }
-    return { id: String(account.user_id), name: account.username, avatar: '', provider: 'test-password' };
-  }
-
   async function saveOAuthState(state, browserNonce, returnTo) {
     rows(await db.from('oauth_states').insert({ state_hash: hash(state), browser_nonce_hash: hash(browserNonce), return_to: returnTo, expires_at: iso(Date.now() + 10 * 60000) }));
   }
@@ -118,6 +94,35 @@ export function createCloudbaseStore(config) {
   async function saveAnswerMap({ answerId, questionId, payload, sourceHash, model, promptVersion }) {
     await upsert('answer_maps', { answer_id: answerId, question_id: questionId, payload, source_hash: sourceHash, model, prompt_version: promptVersion, updated_at: iso(Date.now()) }, 'answer_id');
     return payload;
+  }
+
+  // 只删除 schema / prompt 版本已过期的结构图，并且只连带清理「引用了这些图」的碰撞缓存。
+  //
+  // 不要退回成「清空整张 collision_cache」：cacheKey 已经把 COLLISION_VERSION 混进 hash，
+  // 换判定口径时旧缓存本来就命中不了，无条件清表只会在每次重启时误删当前版本的有效缓存。
+  async function pruneAnswerMaps(schemaVersion, promptVersion = '') {
+    const found = rows(await db.from('answer_maps').select('answer_id,payload,prompt_version'));
+    const obsolete = found.filter(item => {
+      const actualSchema = item?.payload?.schemaVersion || item?.payload?.schema_version || '';
+      return actualSchema !== schemaVersion || (promptVersion && item.prompt_version !== promptVersion);
+    }).map(item => item.answer_id);
+    if (!obsolete.length) return 0;
+    for (let at = 0; at < obsolete.length; at += 100) {
+      rows(await db.from('answer_maps').delete().in('answer_id', obsolete.slice(at, at + 100)));
+    }
+    const dropped = new Set(obsolete);
+    const staleKeys = rows(await db.from('collision_cache').select('cache_key,answer_ids'))
+      .filter(item => {
+        const ids = Array.isArray(item.answer_ids) ? item.answer_ids
+          : (() => { try { return JSON.parse(item.answer_ids || '[]'); } catch { return []; } })();
+        // answer_ids 解析不出来时保守保留：宁可留一条失效缓存，也不误删有效缓存。
+        return ids.length ? ids.some(id => dropped.has(id)) : false;
+      })
+      .map(item => item.cache_key);
+    for (let at = 0; at < staleKeys.length; at += 100) {
+      rows(await db.from('collision_cache').delete().in('cache_key', staleKeys.slice(at, at + 100)));
+    }
+    return obsolete.length;
   }
 
   async function getCollisionCache(cacheKey) {
@@ -209,5 +214,5 @@ export function createCloudbaseStore(config) {
     return { answers, questions };
   }
 
-  return { session, createSession, deleteSession, registerTestUser, authenticateTestUser, saveOAuthState, consumeOAuthState, getDataset, importDataset, getAnswerMaps, getAnswerMap, saveAnswerMap, getCollisionCache, saveCollisionCache, listDiscoveries, saveDiscovery, commentDiscovery, updateDiscoveryStatus, withdrawDiscoveryComment, act, comment, snapshot };
+  return { session, createSession, deleteSession, saveOAuthState, consumeOAuthState, getDataset, importDataset, getAnswerMaps, getAnswerMap, saveAnswerMap, pruneAnswerMaps, getCollisionCache, saveCollisionCache, listDiscoveries, saveDiscovery, commentDiscovery, updateDiscoveryStatus, withdrawDiscoveryComment, act, comment, snapshot };
 }

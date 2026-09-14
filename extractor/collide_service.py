@@ -500,11 +500,11 @@ def do_collide(body: dict) -> dict:
 
     三层判定：
       1. 结构校验（节点存在、来自不同回答）；
-      2. pair_screen 零 LLM 预检，按必要条件合取判定，不合格直接 no_result；
+      2. pair_screen 零 LLM 预检，只拦明显无关或近乎重复的组合；
       3. collide() 两步模型判定（关系判定带举证责任 → 提问）。
 
     第 2 层的意义是：不合格的配对在这里就返回，省掉一次模型调用，
-    并给出可解释的拒绝理由（对象不同 / 条件互斥 / 裁决平面不同）。
+    并给出可解释的拒绝理由；条件差异、互补视角和共同盲点会留给模型继续判断。
     """
     refs = body.get("refs") or []
     if len(refs) != 2:
@@ -540,7 +540,7 @@ def do_collide(body: dict) -> dict:
              "author": a2["author"], "claim": n2.get("statement"), "quote": n2.get("quote")},
         ]
 
-    # ---- 第 2 层：零 LLM 预检。必要条件合取，不做综合分歧度打分 ----
+    # ---- 第 2 层：零 LLM 预检。只排除明显无关或近乎重复的组合 ----
     screen = screen_pair(n1, n2)
     if not screen["collidable"]:
         print(f"[collide] screened out code={screen['code']} "

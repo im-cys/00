@@ -35,14 +35,14 @@ export async function configuration() {
     dataImportToken: env.DATA_IMPORT_TOKEN || '',
     aiModel: env.EXTRACT_MODEL || 'deepseek-v4-pro',
     aiApiKeyConfigured: Boolean(env.EXTRACT_API_KEY),
-    // 临时真实环境多账号测试入口。测试结束后设为 false，再删除对应路由与表。
-    testPasswordAuthEnabled: String(env.TEST_PASSWORD_AUTH_ENABLED ?? 'true').toLowerCase() === 'true',
+    // 启动时清理过期结构图。默认开启且幂等（只删版本不匹配的图）；
+    // 需要在生产库上临时叫停自动清理时，设 PRUNE_OBSOLETE_MAPS=false。
+    pruneObsoleteMaps: String(env.PRUNE_OBSOLETE_MAPS ?? 'true').toLowerCase() === 'true',
     privateDataDir,
     collisionDataDir: isAbsolute(collisionDataSetting) ? resolve(collisionDataSetting) : resolve(privateDataDir, collisionDataSetting),
     operationLogPath: operationLogSetting ? (isAbsolute(operationLogSetting) ? resolve(operationLogSetting) : resolve(root, operationLogSetting)) : '',
     zhihuAuth: {
       configured: Boolean((env.ZHIHU_OAUTH_APP_ID || env.ZHIHU_CLIENT_ID) && (env.ZHIHU_OAUTH_APP_KEY || env.ZHIHU_CLIENT_SECRET)),
-      demoMode: String(env.ZHIHU_AUTH_DEMO_MODE ?? 'false').toLowerCase() === 'true',
       appId: env.ZHIHU_OAUTH_APP_ID || env.ZHIHU_CLIENT_ID || '',
       appKey: env.ZHIHU_OAUTH_APP_KEY || env.ZHIHU_CLIENT_SECRET || '',
       accessSecret: env.ZHIHU_ACCESS_SECRET || '',

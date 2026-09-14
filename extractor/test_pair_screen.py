@@ -5,7 +5,8 @@
     A「30岁的时候，可能你会面临一次创业或者继续打工的选择」
     B「有家庭、上有老下有小的，极度不建议冲动辞职，可以把想做的事当副业」
 旧链路判成「条件分歧」并生成了有漏洞的问题。四个维度差异都很大，
-但真实关系是 B 属于 A 那个分岔口的一个具体解法，两者相容。
+但真实关系是 B 属于 A 那个分岔口的一个具体解法，两者相容。新版允许它进入
+关联判断，但必须保持中立，不能仅凭措辞差异强行定性为冲突。
 """
 
 import sys
@@ -33,8 +34,8 @@ def node(statement, axis, stance, audience=None, stage=None, premise=None, exclu
 
 
 class PairScreenTest(unittest.TestCase):
-    def test_regression_descriptive_vs_prescriptive_is_rejected(self):
-        """截图里的误判必须被拦下：一方只描述现象，一方主张该不该做。
+    def test_descriptive_and_prescriptive_can_form_a_related_question(self):
+        """描述现象与行动建议有共同对象时，可以形成解释或边界问题。
 
         这里两个 axis 取相同值，因为 v2.4 的 knownAxes 机制会让同一问题下的
         回答复用同一个争议对象说法。也就是说 C1（对象对齐）会放行，
@@ -51,10 +52,9 @@ class PairScreenTest(unittest.TestCase):
             audience=["上有老下有小"], excludes=["冲动辞职从零开始"],
         )
         result = screen_pair(a, b)
-        self.assertFalse(result["collidable"])
-        self.assertEqual(result["code"], "stance_incomparable")
-        self.assertIn("描述现象", result["reason"])
-        # 对象已对齐、条件也不互斥，说明拦下它的确实是裁决平面这一条。
+        self.assertTrue(result["collidable"])
+        self.assertEqual(result["signals"]["stance"]["relation_hint"],
+                         "description_and_recommendation")
         self.assertTrue(result["signals"]["axis"]["exact"])
         self.assertFalse(result["signals"]["stance"]["conflict_possible"])
 
@@ -67,8 +67,8 @@ class PairScreenTest(unittest.TestCase):
         self.assertFalse(result["collidable"])
         self.assertEqual(result["code"], "axis_mismatch")
 
-    def test_exclusive_conditions_are_rejected(self):
-        """双方都限定了人群且没有交集：面向的不是同一类人。"""
+    def test_different_conditions_are_kept_as_relation_context(self):
+        """同一对象下的人群差异可以帮助追问适用边界，不在预检层误杀。"""
         a = node("刚毕业的话我建议你先进大厂把基本功打扎实，别急着做选择",
                  "该不该裸辞创业", "should",
                  audience=["应届毕业生"])
@@ -76,9 +76,10 @@ class PairScreenTest(unittest.TestCase):
                  "该不该裸辞创业", "should",
                  audience=["退休返聘人员"])
         result = screen_pair(a, b)
-        self.assertFalse(result["collidable"])
-        self.assertEqual(result["code"], "conditions_exclusive")
+        self.assertTrue(result["collidable"])
         self.assertIn("audience", result["signals"]["conditions"]["exclusive_keys"])
+        self.assertEqual(result["signals"]["conditions"]["relation_hint"],
+                         "different_conditions")
 
     def test_direct_conflict_candidate_passes_with_excludes_hit(self):
         """一方的主张正好落在另一方明确排除的做法里 → 最强的真冲突信号。"""
@@ -122,6 +123,7 @@ class PairScreenTest(unittest.TestCase):
         text = render_screen(screen_pair(a, b)["signals"])
         self.assertIn("争议对象已对齐", text)
         self.assertIn("没有在原文中明确排除", text)
+        self.assertIn("互补、适用边界或共同盲点", text)
 
     # ------------------------------------------------------------------
     # v2 收紧：C5 相似度闸门 与 C4 分歧信号闸门
@@ -139,8 +141,8 @@ class PairScreenTest(unittest.TestCase):
         similarity = result["signals"]["similarity"]
         self.assertGreater(similarity["value"], similarity["limit"])
 
-    def test_same_topic_without_any_conflict_signal_is_rejected(self):
-        """C4：在谈同一件事但找不到实质分歧迹象，属于「各说一面」。
+    def test_same_topic_without_conflict_signal_is_a_related_candidate(self):
+        """同一对象下各说一面也可能形成互补或共同盲点问题。
 
         这是本次收紧的主要目标。旧版只要没被 C1～C3 否证就放行，
         等于默认「分歧存在」；实际上这类配对最常见，且多数无价值。
@@ -148,9 +150,38 @@ class PairScreenTest(unittest.TestCase):
         a = node("我觉得选专业要把长期收益放在热度前面", "", "should")
         b = node("长期收益和当下热度之间我选前面那个", "", "should")
         result = screen_pair(a, b)
-        self.assertFalse(result["collidable"])
-        self.assertEqual(result["code"], "no_conflict_signal")
+        self.assertTrue(result["collidable"])
+        self.assertEqual(result["code"], "related_candidate")
         self.assertEqual(result["signals"]["conflict_signals"], [])
+
+    def test_weak_divergence_signal_alone_is_not_a_conflict_candidate(self):
+        """强弱信号分级：只靠相似度推出的「同轴异答」不足以定性为冲突。
+
+        这两句都主张「该优先看某个指标」，只是指标不同，没有排除表述、
+        没有立场对立、也不是绝对 vs 条件。它确实可能是冲突，也可能是互补，
+        所以预检必须保持中立：标为 related_candidate，并在给模型的提示里
+        保留互补/边界/盲点这条路，由模型结合原文定性。
+        """
+        a = node("我认为选专业该优先看转身空间", "选专业时该优先看什么", "should")
+        b = node("我觉得选专业该优先看起薪", "选专业时该优先看什么", "should")
+        result = screen_pair(a, b)
+        self.assertTrue(result["collidable"])
+        codes = {item["code"] for item in result["signals"]["conflict_signals"]}
+        self.assertEqual(codes, {"same_axis_divergent_claims"})
+        self.assertEqual(result["code"], "related_candidate")
+        self.assertEqual(result["signals"]["relation_basis"], "complementary_perspectives")
+
+    def test_strong_signal_is_a_conflict_candidate(self):
+        """对照组：命中强信号（立场对立）时才定性为冲突候选。"""
+        a = node("我认为有家庭负担的人也该果断辞职创业", "有家庭负担的人该不该裸辞",
+                 "should", audience=["上有老下有小"])
+        b = node("如果你上有老下有小，我不建议辞职，先用副业验证",
+                 "有家庭负担的人该不该裸辞", "should_not", audience=["上有老下有小"])
+        result = screen_pair(a, b)
+        self.assertEqual(result["signals"]["relation_basis"], "conflict")
+        self.assertIn(result["code"], {"candidate", "direct_conflict_candidate"})
+        text = render_screen(result["signals"])
+        self.assertNotIn("互补、适用边界或共同盲点", text)
 
     def test_opposed_stance_is_a_conflict_signal(self):
         """一方主张该做、另一方主张不该做：客观可核的分歧信号。"""
@@ -175,15 +206,32 @@ class PairScreenTest(unittest.TestCase):
         self.assertIn("absolute_vs_conditional", codes)
 
     def test_axis_overlap_needs_enough_shared_grams(self):
-        """C1：两侧都登记了 axis 但措辞不同时，共享词须达到 AXIS_OVERLAP_MIN。"""
+        """C1：两侧 axis 措辞不同且完整观点也不共享概念时，仍要拒绝。
+
+        v3 把 AXIS_OVERLAP_MIN 降到 1 后，未对齐的 axis 会继续走 semantic 回退层，
+        由完整观点再判一次。这里两句话分属选专业与周末安排，两层都过不了，
+        因此最终仍是 axis_mismatch——放宽阈值不等于放行无关配对。
+        """
         a = node("我认为选专业该优先看转身空间", "选专业时该优先看什么", "should")
         b = node("我觉得周末该用来彻底休息", "周末该怎么安排休息", "should")
         result = screen_pair(a, b)
         self.assertFalse(result["collidable"])
         self.assertEqual(result["code"], "axis_mismatch")
-        self.assertEqual(result["signals"]["axis"]["level"], "overlap")
-        self.assertLess(result["signals"]["axis"]["shared_count"],
-                        result["signals"]["axis"]["threshold"])
+        axis = result["signals"]["axis"]
+        # axis 二元组没达到门槛，才会落到 semantic 层；semantic 也没达标，所以被拒。
+        self.assertEqual(axis["level"], "semantic")
+        self.assertLess(axis["shared_count"], axis["threshold"])
+        self.assertLess(axis["statement_shared_count"], axis["statement_threshold"])
+
+    def test_statement_semantics_can_recover_differently_worded_axes(self):
+        a = node("职业规划应该避开重复劳动，给未来保留成长空间",
+                 "是否应选择重复劳动的岗位", "should_not")
+        b = node("做职业规划时要优先考虑能持续成长的工作",
+                 "长期职业规划最该看什么", "should")
+        result = screen_pair(a, b)
+        self.assertTrue(result["collidable"])
+        self.assertEqual(result["signals"]["axis"]["level"], "semantic")
+        self.assertGreaterEqual(result["signals"]["axis"]["statement_shared_count"], 2)
 
     def test_fallback_alignment_needs_stronger_evidence_for_divergence(self):
         """axis 缺失时，「同轴异答」信号要求更高的共享词门槛。

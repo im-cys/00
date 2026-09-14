@@ -6,11 +6,11 @@ import { fileURLToPath } from 'node:url';
 import { root, configuration } from './config.mjs';
 import { createStore } from './store.mjs';
 
-const PROMPT_VERSION = 'answer-tree-v2.8-node-explanation';
-const APP_RELEASE = '2026-09-15.2-map-generation';
+const PROMPT_VERSION = 'answer-tree-v2.9-related-collision';
+const APP_RELEASE = '2026-09-15.4-zhihu-only-related-collision';
 // v2：碰撞判定改为「零成本预检闸门 + 两步模型判定（关系判定带举证责任 → 提问）」。
 // 判定口径变了，旧缓存必须失效，否则同一对节点会继续命中 v1 的误判结果。
-const COLLISION_VERSION = 'collision-v5-question-detail';
+const COLLISION_VERSION = 'collision-v6-related-perspectives';
 const ANSWER_MAP_SCHEMA = 'answer-tree-v2';
 const MAP_GENERATION_TIMEOUT_MS = 15 * 60 * 1000;
 const sha256 = value => createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex');
@@ -90,17 +90,9 @@ export function createServer(config, store) {
   const allowedHosts = new Set((config.allowedHosts || []).map(value => value.toLowerCase()));
   const allowedOrigins = new Set(config.allowedOrigins || []);
   const hostName = value => { try { return new URL(`http://${value}`).hostname.toLowerCase(); } catch { return ''; } };
-  const sessionInfo = user => ({ user, provider: user?.provider || null, configured: Boolean(config.zhihuAuth?.configured), demoMode: Boolean(config.zhihuAuth?.demoMode), testPasswordAuthEnabled: Boolean(config.testPasswordAuthEnabled) });
+  const sessionInfo = user => ({ user, provider: user?.provider || null, configured: Boolean(config.zhihuAuth?.configured) });
   const send = (res, status, data) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(data)); };
   const currentUser = req => store.session(cookies(req).qm_session);
-  const loginAttempts = new Map();
-  const loginAttemptKey = (req, username) => `${String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim()}|${String(username || '').normalize('NFKC').trim().toLowerCase()}`;
-  const checkLoginRate = key => {
-    const now = Date.now(); const recent = (loginAttempts.get(key) || []).filter(at => now - at < 10 * 60000);
-    loginAttempts.set(key, recent);
-    if (recent.length >= 12) throw Object.assign(new Error('尝试次数过多，请 10 分钟后再试。'), { status: 429 });
-  };
-  const failedLogin = key => loginAttempts.set(key, [...(loginAttempts.get(key) || []), Date.now()]);
   const validStoredMap = async answerId => {
     const dataset = datasetValue(await store.getDataset());
     const source = answerFrom(dataset, answerId);
@@ -206,23 +198,6 @@ export function createServer(config, store) {
 
       if (req.method === 'GET' && path === '/api/auth/session') return send(res, 200, sessionInfo(await currentUser(req)));
 
-      if (req.method === 'POST' && /^\/api\/auth\/test\/(register|login)$/.test(path)) {
-        if (!config.testPasswordAuthEnabled) return send(res, 404, { error: '测试账号登录已关闭。' });
-        const input = await jsonBody(req, 4000); const key = loginAttemptKey(req, input.username);
-        try {
-          checkLoginRate(key);
-          const user = path.endsWith('/register')
-            ? await store.registerTestUser(input.username, input.password)
-            : await store.authenticateTestUser(input.username, input.password);
-          const token = await store.createSession(user); loginAttempts.delete(key);
-          res.setHeader('Set-Cookie', cookie('qm_session', token, { secure: secureFor(config, req) }));
-          return send(res, 200, { ok: true, returnTo: safeReturnTo(input.returnTo), session: sessionInfo(user) });
-        } catch (error) {
-          failedLogin(key);
-          return send(res, error.status || 500, { error: error.status ? error.message : '测试账号登录失败。' });
-        }
-      }
-
       if (req.method === 'GET' && path === '/auth/zhihu') {
         const returnTo = safeReturnTo(url.searchParams.get('return_to'));
         if (config.zhihuAuth?.configured) {
@@ -236,12 +211,6 @@ export function createServer(config, store) {
           target.searchParams.set('state', state);
           if (config.zhihuAuth.scope) target.searchParams.set('scope', config.zhihuAuth.scope);
           res.writeHead(302, { Location: target.href, 'Set-Cookie': cookie('qm_oauth_nonce', browserNonce, { secure: secureFor(config, req), maxAge: 600 }), 'Cache-Control': 'no-store' }); return res.end();
-        }
-        if (config.zhihuAuth?.demoMode) {
-          const suffix = randomBytes(3).toString('hex');
-          const user = { id: `zhihu-demo-${suffix}`, name: `知乎试用用户 ${suffix.toUpperCase()}`, avatar: '', provider: 'zhihu-demo' };
-          const token = await store.createSession(user);
-          res.writeHead(302, { Location: returnTo, 'Set-Cookie': cookie('qm_session', token, { secure: secureFor(config, req) }), 'Cache-Control': 'no-store' }); return res.end();
         }
         return send(res, 503, { error: '知乎登录尚未配置。' });
       }
@@ -383,9 +352,9 @@ export function createServer(config, store) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const config = await configuration();
   const store = await createStore(config);
-  if (!config.useDatabase && store.pruneAnswerMaps) {
+  if (config.pruneObsoleteMaps && store.pruneAnswerMaps) {
     const removed = await store.pruneAnswerMaps(ANSWER_MAP_SCHEMA, PROMPT_VERSION);
-    if (removed) console.log(`已删除 ${removed} 份旧版回答结构图及其碰撞缓存。`);
+    if (removed) console.log(`已删除 ${removed} 份旧版回答结构图及其相关碰撞缓存（保留原文、社区数据与当前版本缓存）。`);
   }
   const server = createServer(config, store);
   server.on('error', error => { console.error(error.code === 'EADDRINUSE' ? `端口 ${config.port} 已被占用。` : error.message); process.exitCode = 1; });

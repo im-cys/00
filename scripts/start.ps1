@@ -81,14 +81,9 @@ $resolvedMaps = Find-FirstFile @(
     (Join-Path (Split-Path -Parent $resolvedData) 'collision-maps.js')
 )
 
-# Local development is isolated from CloudBase and uses automatic demo login.
+# Local development is isolated from CloudBase. Authentication still uses the
+# Zhihu OAuth credentials loaded by the Node service from the project .env.
 $env:CLOUDBASE_USE_DATABASE = 'false'
-$env:ZHIHU_AUTH_DEMO_MODE = 'true'
-$env:ZHIHU_OAUTH_APP_ID = ''
-$env:ZHIHU_OAUTH_APP_KEY = ''
-$env:ZHIHU_CLIENT_ID = ''
-$env:ZHIHU_CLIENT_SECRET = ''
-$env:ZHIHU_OAUTH_REDIRECT_URI = "$baseUrl/auth/zhihu/callback"
 $env:ALLOWED_HOSTS = '127.0.0.1,localhost'
 $env:HOST = '127.0.0.1'
 $env:PORT = '3210'

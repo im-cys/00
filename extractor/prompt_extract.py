@@ -23,7 +23,7 @@ explanation 补的是 statement 里装不下的东西：成立前提、为什么
 statement 时返回空串，前端降级显示完整观点，不为一个展示字段触发整树重试。
 """
 
-PROMPT_VERSION = "answer-tree-v2.8-node-explanation"
+PROMPT_VERSION = "answer-tree-v2.9-related-collision"
 
 # 密度带：跨回答共用的绝对标准（不随文章长短变化）。
 DENSITY_BAND = {

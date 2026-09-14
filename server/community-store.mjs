@@ -2,9 +2,8 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { root } from './config.mjs';
-import { createPasswordRecord, testUserId, validateTestCredentials, verifyPassword } from './test-auth.mjs';
 
-const emptyDatabase = () => ({ version: 3, sessions: {}, oauthStates: {}, testAccounts: {}, answers: {}, dataset: null, maps: {}, collisionCache: {}, discoveries: {}, discoveryComments: {} });
+const emptyDatabase = () => ({ version: 3, sessions: {}, oauthStates: {}, answers: {}, dataset: null, maps: {}, collisionCache: {}, discoveries: {}, discoveryComments: {} });
 const toggleActions = new Set(['upvote', 'like', 'favorite']);
 
 export function createCommunityStore(filePath = resolve(root, 'runtime', 'community.json')) {
@@ -13,7 +12,7 @@ export function createCommunityStore(filePath = resolve(root, 'runtime', 'commun
   async function read() {
     try {
       const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-      return { ...emptyDatabase(), ...parsed, sessions: parsed.sessions || {}, oauthStates: parsed.oauthStates || {}, testAccounts: parsed.testAccounts || {}, answers: parsed.answers || {}, maps: parsed.maps || {}, collisionCache: parsed.collisionCache || {}, discoveries: parsed.discoveries || {}, discoveryComments: parsed.discoveryComments || {} };
+      return { ...emptyDatabase(), ...parsed, sessions: parsed.sessions || {}, oauthStates: parsed.oauthStates || {}, answers: parsed.answers || {}, maps: parsed.maps || {}, collisionCache: parsed.collisionCache || {}, discoveries: parsed.discoveries || {}, discoveryComments: parsed.discoveryComments || {} };
     } catch (error) {
       if (error.code === 'ENOENT') return emptyDatabase();
       throw error;
@@ -63,26 +62,6 @@ export function createCommunityStore(filePath = resolve(root, 'runtime', 'commun
     await mutate(database => { delete database.sessions[token]; });
   }
 
-  async function registerTestUser(username, password) {
-    const credentials = validateTestCredentials(username, password);
-    const passwordRecord = await createPasswordRecord(credentials.password);
-    return mutate(database => {
-      if (database.testAccounts[credentials.usernameKey]) throw Object.assign(new Error('该用户名已存在，请直接登录。'), { status: 409 });
-      const user = { id: testUserId(credentials.usernameKey), name: credentials.username, avatar: '', provider: 'test-password' };
-      database.testAccounts[credentials.usernameKey] = { ...passwordRecord, username: credentials.username, user, createdAt: Date.now() };
-      return user;
-    });
-  }
-
-  async function authenticateTestUser(username, password) {
-    const credentials = validateTestCredentials(username, password);
-    const account = (await read()).testAccounts[credentials.usernameKey];
-    if (!account || !await verifyPassword(credentials.password, account.salt, account.passwordHash)) {
-      throw Object.assign(new Error('用户名或密码不正确。'), { status: 401 });
-    }
-    return account.user;
-  }
-
   async function saveOAuthState(state, browserNonce, returnTo) {
     await mutate(database => { database.oauthStates[state] = { browserNonce, returnTo, expiresAt: Date.now() + 10 * 60000 }; });
   }
@@ -112,14 +91,22 @@ export function createCommunityStore(filePath = resolve(root, 'runtime', 'commun
   async function pruneAnswerMaps(schemaVersion, promptVersion = '') {
     return mutate(database => {
       let removed = 0;
+      const dropped = new Set();
       for (const [answerId, item] of Object.entries(database.maps)) {
         const actual = item?.payload?.schemaVersion || item?.payload?.schema_version || '';
         const actualPrompt = item?.promptVersion || item?.prompt_version || '';
         if (actual === schemaVersion && (!promptVersion || actualPrompt === promptVersion)) continue;
         delete database.maps[answerId];
+        dropped.add(answerId);
         removed++;
       }
-      if (removed) database.collisionCache = {};
+      // 只清理引用了被删结构图的缓存条目，不整表清空（理由见 cloudbase-store 同名函数）。
+      if (removed) {
+        for (const [cacheKey, entry] of Object.entries(database.collisionCache)) {
+          const ids = Array.isArray(entry?.answerIds) ? entry.answerIds : [];
+          if (ids.length && ids.some(id => dropped.has(id))) delete database.collisionCache[cacheKey];
+        }
+      }
       return removed;
     });
   }
@@ -224,5 +211,5 @@ export function createCommunityStore(filePath = resolve(root, 'runtime', 'commun
     return snapshotFrom(await read(), userId);
   }
 
-  return { session, createSession, deleteSession, registerTestUser, authenticateTestUser, saveOAuthState, consumeOAuthState, getDataset, importDataset, getAnswerMaps, getAnswerMap, saveAnswerMap, pruneAnswerMaps, getCollisionCache, saveCollisionCache, listDiscoveries, saveDiscovery, commentDiscovery, updateDiscoveryStatus, withdrawDiscoveryComment, act, comment, snapshot };
+  return { session, createSession, deleteSession, saveOAuthState, consumeOAuthState, getDataset, importDataset, getAnswerMaps, getAnswerMap, saveAnswerMap, pruneAnswerMaps, getCollisionCache, saveCollisionCache, listDiscoveries, saveDiscovery, commentDiscovery, updateDiscoveryStatus, withdrawDiscoveryComment, act, comment, snapshot };
 }

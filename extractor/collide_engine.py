@@ -22,20 +22,13 @@
    填 superficial、留空或填非法值一律 no_result。
    旧版只拦 superficial，漏填就直接放行，是通过率过高的主要来源之一。
 
-4. **允许无结果是一等公民**：
-   no_result 不计为技术失败。语义塌缩现象证明：有些节点对就是不值得碰。
+4. **碰撞不只等于正面对立**：
+   同一对象上的互补视角、条件差异和共同前提，也可能引出值得回答的新问题。
+   只有明显无关或近乎重复的组合才直接 no_result。
 
-v4 收紧（本次）。用户反馈「通过率太高，一定要有价值才能碰撞」，定位到四处根因：
-
-   a. **共识支撑绕过了全部实质闸门**（真逻辑漏洞）。它既不在 NON_PRODUCTIVE、
-      也不在 CONFLICT_TYPES 里，于是判「表面像分歧、实则共享同一判断」时
-      既不走 no_result、也不需举证，直接 published。而这恰恰是最典型的
-      无价值碰撞。现已并入 NON_PRODUCTIVE。
-   b. **举证只校验非空**。模型写「这个人」「不能同时接受」也算过关。现在加
-      最小长度与笼统措辞黑名单（_VAGUE_EVIDENCE），复述要求不算举证。
-   c. **单条依据即可声称对立**。现在冲突类要求 evidence ≥2 条，双方各出一条。
-   d. **模型自述无人交叉核对**。「直接对立」现在必须与 pair_screen 的客观信号
-      对得上（原文排除表述或主张方向相反），核不上即退回。
+v5 放宽：保留冲突类的三项举证与原文回查，但不再把“互补细化”和“共识支撑”
+直接判为无结果。只要两侧都提供可定位的原文依据，并能说明共同对象，就继续生成
+组合方法、适用边界或共同盲点问题。这样放宽关系类型，但不放松证据真实性。
 
 各项阈值集中在文件顶部常量区，调整通过率只改那里。
 
@@ -70,12 +63,10 @@ COMPLEMENTARY = "互补细化"
 CONSENSUS = "共识支撑"
 # 声称这些关系必须完成举证。
 CONFLICT_TYPES = {"归因冲突", "机制冲突", "直接对立", "元层冲突", "条件分歧"}
-# 这些关系不产出问题，直接结束。
-#
-# 共识支撑必须在此列：它的定义就是「表面像分歧，实则共享同一个未言明的判断」，
-# 也就是本来不该碰的那一类。旧版把它漏在 NON_PRODUCTIVE 和 CONFLICT_TYPES 之外，
-# 于是它既不走 no_result、也不需要举证，成了绕过全部实质闸门的直通车。
-NON_PRODUCTIVE = {NO_RESULT, COMPLEMENTARY, CONSENSUS}
+# 互补与共识并非冲突，但只要两侧原文都能支撑一个共同对象，仍可引出组合方法、
+# 适用边界或共同盲点问题。真正不产出问题的只有“无有效关系”。
+RELATED_TYPES = {COMPLEMENTARY, CONSENSUS}
+NON_PRODUCTIVE = {NO_RESULT}
 
 # ---------------------------------------------------------------------------
 # 举证质量阈值。收紧通过率时只调这里。
@@ -118,9 +109,10 @@ relation_type 必须从以下取值中选一个：
 - 互补细化：一方是另一方在更窄条件下的具体做法，两者相容，不构成分歧
 - 无有效关系：两者裁决的根本不是一回事
 
-**默认答案是后三个。** 大多数配对只是两个人各说一面，并不构成分歧。
-只有当你能完成下面的举证时，才可以选择前五个冲突类取值。
-判「共识支撑/互补细化/无有效关系」不是失败，系统会正常结束；硬凑一个冲突才是失败。
+不要把“碰撞”机械理解成正面对立。两个人各说一面时，如果它们共同回答同一个对象，
+组合后能暴露适用边界、取舍方法或共同遗漏的问题，应判「互补细化」或「共识支撑」。
+只有裁决对象确实无关，或两句话近乎重复且没有新增信息时，才判「无有效关系」。
+硬凑冲突仍然是错误，但识别有依据的关联是本任务的一部分。
 
 ────────── 举证责任（最重要）──────────
 
@@ -144,6 +136,10 @@ relation_type 必须从以下取值中选一个：
    ✓「照 A 立刻辞职就拿不到 B 说的副业验证期，房贷断供的风险要由家人承担」
    如果两个建议可以同时执行，或者一个只是另一个的具体做法，那就是「互补细化」。
 
+如果你选择「互补细化」或「共识支撑」，shared_axis 仍然必填，说明两边共同回答的
+具体对象；relation_text 要说明两者怎样互相补充、各自覆盖什么，以及组合后还能追问
+哪个适用边界、取舍或共同盲点。不要为了通过而伪造 incompatible_because。
+
 特别注意「条件分歧」：它最容易被滥用。只有当双方适用范围**有重叠**、
 且在重叠处给出**不相容**结论时才成立。如果各自条件根本不重叠，那是「无有效关系」。
 如果系统提示「双方都没有明确限定适用条件」，那么「条件分歧」缺少依据，不要选它。
@@ -158,15 +154,15 @@ dispute_scale 从两个取值中选：
 - substantive：真实分歧。在 overlap_case 下，两人会给出实际相反的行动或判断。
 - superficial：只是强度、措辞、侧重或详略不同，实际主张一致。
 
-**只有明确填写 substantive 才会继续产出问题。** 填 superficial、留空或填其他值，
-系统都按无结果结束。所以不要为了让流程走下去而填 substantive——
+冲突类关系只有明确填写 substantive 才会继续产出问题；「互补细化」和「共识支撑」
+可以填写 superficial，因为它们的价值来自关联而不是对立。所以不要为了让流程走下去而填 substantive——
 先问自己：那个具体的人照 A 做和照 B 做，最后的行动真的不一样吗？
 如果只是「一个说得更强硬、一个说得更委婉」，那就是 superficial。
 
 ────────── 引用条数 ──────────
 
-选择冲突类取值时，evidence **至少 2 条**，且应当双方各出至少一条。
-只有一条依据说明你只看到了一方的表述，撑不起一个对立判断。
+除「无有效关系」外，evidence **至少 2 条**，且必须双方各出至少一条。
+无论判断冲突还是关联，都不能只凭一篇回答推测另一篇的意思。
 
 ────────── 关系说明 ──────────
 
@@ -193,7 +189,7 @@ evidence 数组列出你依据的原文片段（逐字摘录，每条 10–60 �
 {
   "relation_type": "上述取值之一",
   "dispute_scale": "substantive 或 superficial",
-  "shared_axis": "两人共同裁决的对象（冲突类必填）",
+  "shared_axis": "两人共同讨论的具体对象（除无有效关系外必填）",
   "overlap_case": "同时落入双方适用范围的具体情形（冲突类必填）",
   "incompatible_because": "为何两个结论不能同时接受（冲突类必填）",
   "relation_text": "AI 分析说明，80–240字，1–2个自然段",
@@ -224,7 +220,7 @@ USER_RELATION_TPL = """【原问题】{question}
 # ---------------------------------------------------------------------------
 SYS_QUESTION = """你是一个「提问者」。这是知乎——一个从问题出发的平台。
 
-关系已经判定完毕，并通过了举证。你现在只做一件事：由这个关系引申出一个新问题。
+关系已经判定完毕，并通过了原文举证。你现在只做一件事：由这个关系引申出一个新问题。
 
 只输出 JSON，不要解释，不要 markdown 围栏。
 
@@ -232,8 +228,9 @@ SYS_QUESTION = """你是一个「提问者」。这是知乎——一个从问�
 
 1. question 必须是一个问句，以问号结尾，**≤35 字，越短越有力**。
 
-2. 问题必须落在已给出的 overlap_case 上——也就是问「那个同时符合双方条件的人该怎么办」。
-   这是问题有价值的根源：它是两篇回答都碰到、但都没有单独回答清楚的那个情形。
+2. 如果是冲突类关系，问题应落在 overlap_case 上，追问同一情形下该如何取舍。
+   如果是「互补细化/共识支撑」，问题应围绕 shared_axis，追问两种视角如何组合、
+   各自何时适用，或两边共同没有回答的关键变量。不要硬写成二选一。
 
 3. 不要提原问题的同义改写。新问题必须是原问题回答不了、
    但读完这两篇回答后才浮现出来的那个问题。
@@ -248,8 +245,8 @@ SYS_QUESTION = """你是一个「提问者」。这是知乎——一个从问�
 question_detail 是问题卡片下方展示给读者的说明，60–160 字，1–2 句。
 它要回答读者心里的「这问题到底在问什么、为什么值得答」，写清三件事：
 
-1. 这个问题落在谁身上——把 overlap_case 那个具体的人或情形说出来；
-2. 为什么两篇回答都答不了它——各自的建议在这个情形下会指向哪个不同的动作；
+1. 这个问题落在哪个共同对象或具体情形上；
+2. 为什么两篇回答合在一起仍没答完——冲突时写不同动作，互补时写尚缺的边界或取舍；
 3. 答它需要什么——读者应该提供哪一类经验或判断依据。
 
 写法要求：
@@ -300,7 +297,8 @@ USER_QUESTION_TPL = """【原问题】{question}
 为何不能同时接受：{incompatible_because}
 关系说明：{relation_text}
 
-请针对「{overlap_case}」这个情形提出新问题。
+请根据关系类型提出新问题：冲突类围绕「{overlap_case}」的具体取舍；
+互补细化或共识支撑围绕「{shared_axis}」追问组合方法、适用边界或共同盲点。
 记住引用铁律：evidence 必须逐字、连续地来自上面的原文片段。
 只输出 JSON。"""
 
@@ -399,6 +397,12 @@ def _question_detail(value, relation: dict) -> str:
 
     overlap = str(relation.get("overlap_case") or "").strip()
     incompatible = str(relation.get("incompatible_because") or "").strip()
+    relation_text = str(relation.get("relation_text") or "").strip()
+    if not overlap and not incompatible and relation_text:
+        return (
+            f"两篇回答的关联在于：{relation_text}"
+            "这个问题希望进一步补上两边都没有说明的适用边界或取舍依据。"
+        )[:MAX_QUESTION_DETAIL_LEN]
     if not overlap and not incompatible:
         return ""
     parts = []
@@ -483,7 +487,7 @@ def collide(
     scale = (data.get("dispute_scale") or "").strip()
     out["dispute_scale"] = scale if scale in {"substantive", "superficial"} else None
 
-    # ---- 不产出问题的关系：合法结果，不是失败 ----
+    # ---- 真正无关的关系不产出问题；互补与共识继续寻找延展问题 ----
     if rtype in NON_PRODUCTIVE:
         out["status"] = "no_result"
         default_reason = {
@@ -492,6 +496,19 @@ def collide(
         }.get(rtype, "这两个观点裁决的不是同一件事")
         out["reason"] = out["relation_text"] or default_reason
         return out
+
+    if rtype in RELATED_TYPES:
+        missing = []
+        if _blank(out["shared_axis"]) or len(out["shared_axis"] or "") < MIN_SHARED_AXIS_LEN:
+            missing.append("共同对象")
+        if _evidence_count(data) < MIN_RELATION_EVIDENCE:
+            missing.append("双方原文依据")
+        if missing:
+            out["status"] = "no_result"
+            out["reason"] = (
+                f"判为「{rtype}」但缺少{'、'.join(missing)}，目前不足以从关联继续提问。"
+            )
+            return out
 
     # ---- 举证责任：冲突类必须三项齐全，且必须是真正的举证而非复述要求 ----
     if rtype in CONFLICT_TYPES:
@@ -547,9 +564,8 @@ def collide(
             out["reason"] = conflict_mismatch
             return out
 
-    # ---- 分歧强度闸门：只有明确判定为 substantive 才放行 ----
-    # 旧版只拦 superficial，漏填或非法值会直接通过；现在改为白名单。
-    if out["dispute_scale"] != "substantive":
+    # ---- 分歧强度闸门：只约束冲突类；互补/共识的价值不依赖对立强度 ----
+    if rtype in CONFLICT_TYPES and out["dispute_scale"] != "substantive":
         out["status"] = "no_result"
         out["reason"] = (
             "两人的差异只在强度、措辞或侧重上，实际主张一致，"

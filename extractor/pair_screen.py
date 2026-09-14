@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""碰撞预检闸门：零 LLM 调用，按必要条件合取判定两个节点能否碰撞。
+"""碰撞预检闸门：零 LLM 调用，排除明显无关或近乎重复的节点对。
 
 设计原则（这是本模块存在的理由，改动前请先读）：
 
@@ -7,19 +7,13 @@
     条件下的具体做法），也可以只差一个字就直接对立。因此本模块**不做综合
     分歧度打分**——那样会把「维度差异大但相容」的配对打成高分，恰好放大误判。
 
-    冲突是合取：同一争议对象 ∧ 适用条件有重叠 ∧ 在重叠处两个主张不相容
-    ∧ 至少有一个客观可核的分歧信号。任一条不满足即拒，与其他维度差异多大无关。
+    产品中的“碰撞”不只等于正面对立。共同对象上的条件差异、视角互补和共识背后的
+    未答问题也可能产生有价值的新问题。预检只负责拦截明显无关和近乎重复的组合，
+    其余关系交给带原文证据的模型判定。
 
-v2 收紧（本次）：旧版实际只拦得住「描述性 × 规范性」一种情况，其余配对几乎
-全部放行给模型判定，通过率过高。三处根因与对策：
-
-    1. axis 只要词重叠 ≥2 就算对齐，且 axis 缺失时退回全句比对——同一问题下
-       的任意两个观点几乎必然满足。→ 对齐分级，缺失时门槛提高。
-    2. conditions 经常被模型漏填，空条件视为普遍适用，该闸门几乎不生效。
-       → 保留（不能因为漏填就误杀），但不再作为「有分歧」的证据。
-    3. 没有任何「分歧确实存在」的正面要求，只要没被否证就放行。
-       → 新增 C4：必须命中至少一个客观分歧信号。
-    另加 C5：两个观点文本高度相似时直接判共识，这是无价值碰撞的客观特征。
+v3 放宽：上一版把“碰撞”限定成必须存在客观冲突信号，导致同一对象上的互补视角、
+条件差异和描述/建议组合在进入模型前就被误杀。本版保留 axis 对齐与近重复拦截，
+其余结构化差异只作为关系线索，由模型结合双方原文判断能否提出有价值的问题。
 """
 
 from __future__ import annotations
@@ -40,10 +34,11 @@ _STOP_GRAMS = {
 # 量化阈值。收紧碰撞通过率时只调这里，不要在函数体内散落魔法数字。
 # ---------------------------------------------------------------------------
 # C1 争议对象对齐
-AXIS_OVERLAP_MIN = 3        # 两侧 axis 都存在、措辞不同时，要求的共享二元组数
-AXIS_FALLBACK_MIN = 5       # 任一侧 axis 缺失，退回用观点全句比对时的门槛
+AXIS_OVERLAP_MIN = 1        # 两侧 axis 都存在、措辞不同时，至少共享一个核心概念
+AXIS_SEMANTIC_MIN = 2       # axis 未对齐时，完整观点共享概念的二次回退门槛
+AXIS_FALLBACK_MIN = 3       # 任一侧 axis 缺失，退回用观点全句比对时的门槛
 # C5 观点相似度（Jaccard）。超过上限视为两人在说同一件事，属共识而非分歧。
-CLAIM_SIMILARITY_MAX = 0.50
+CLAIM_SIMILARITY_MAX = 0.54
 # C4 同一 axis 下两个主张要被认定为「给出了不同答案」，相似度须低于此值。
 # 略低于 CLAIM_SIMILARITY_MAX，留出一段中间带：那里两句话既不算近义重复、
 # 也不足以证明分歧，必须靠更硬的信号（原文排除表述、主张方向相反）。
@@ -54,6 +49,11 @@ DIVERGENCE_SIMILARITY_MAX = 0.45
 # 高于 C1 的入门门槛：勉强达标的弱对齐不足以反推「分歧存在」，
 # 那种情况必须靠更硬的信号（原文排除表述、主张方向相反）。
 DIVERGENCE_FALLBACK_SHARED_MIN = 6
+# 强冲突信号：由原文表述或结构化字段直接佐证，不依赖相似度推断。
+# same_axis_divergent_claims 不在此列——它只说明「两句话措辞不同」，
+# 而措辞不同既可能是对立，也可能是互补。因此它不足以让渲染层断言「这是冲突」，
+# 命中它时仍要提示模型考虑互补、适用边界与共同盲点。
+STRONG_CONFLICT_CODES = {"excludes_cross", "stance_opposed", "absolute_vs_conditional"}
 
 # 主张方向两两相容性。值为 True 表示「有可能构成真冲突，放行给后续检查」。
 #
@@ -135,6 +135,7 @@ def _axis_alignment(node_a: dict, node_b: dict) -> tuple[str | None, dict]:
     返回 (level, detail)，level 取 exact / overlap / fallback / None。
     - exact    ：两侧 axis 逐字相同。抽取端按 knownAxes 对齐的主路径。
     - overlap  ：两侧 axis 都存在但措辞不同，共享二元组达到 AXIS_OVERLAP_MIN。
+    - semantic ：axis 措辞没对齐，但完整观点仍共享至少两个有效概念。
     - fallback ：任一侧 axis 缺失，退回观点全句比对，门槛更高。
       这条路径本身就说明抽取质量不足，因此不允许它再单独支撑「强对齐」结论。
     """
@@ -147,7 +148,13 @@ def _axis_alignment(node_a: dict, node_b: dict) -> tuple[str | None, dict]:
         shared = _shared(_bigrams(node_a.get("axis")), _bigrams(node_b.get("axis")))
         detail.update(level="overlap", shared=shared[:6],
                       shared_count=len(shared), threshold=AXIS_OVERLAP_MIN)
-        return ("overlap" if len(shared) >= AXIS_OVERLAP_MIN else None), detail
+        if len(shared) >= AXIS_OVERLAP_MIN:
+            return "overlap", detail
+        claim_shared = _shared(_bigrams(_text_of(node_a)), _bigrams(_text_of(node_b)))
+        detail.update(level="semantic", statement_shared=claim_shared[:6],
+                      statement_shared_count=len(claim_shared),
+                      statement_threshold=AXIS_SEMANTIC_MIN)
+        return ("semantic" if len(claim_shared) >= AXIS_SEMANTIC_MIN else None), detail
     shared = _shared(_bigrams(_text_of(node_a)), _bigrams(_text_of(node_b)))
     detail.update(level="fallback", shared=shared[:6],
                   shared_count=len(shared), threshold=AXIS_FALLBACK_MIN,
@@ -158,11 +165,11 @@ def _axis_alignment(node_a: dict, node_b: dict) -> tuple[str | None, dict]:
 def _conditions_overlap(node_a: dict, node_b: dict) -> tuple[bool, dict]:
     """C2：适用条件是否存在重叠区。
 
-    空条件表示普遍适用，与任何条件都重叠。只有「双方都明确限定了同一子项、
-    且该子项没有任何交集」才判为互斥——两人面向的不是同一类人，不该碰。
+    空条件表示普遍适用，与任何条件都重叠。双方明确限定且没有交集时标记为条件差异，
+    但不直接拒绝；同一对象在不同人群或阶段的差异本身可能引出适用边界问题。
 
-    注意：模型经常漏填 conditions，所以这里不能反向把「都为空」当成分歧证据，
-    它只是一道否证闸门。真正要求分歧存在的是 C4。
+    注意：模型经常漏填 conditions，所以这里不能反向把「都为空」当成分歧证据；
+    这里只记录条件关系，最终由带原文证据的关系判定决定是否值得继续提问。
     """
     cond_a, cond_b = _condition_items(node_a), _condition_items(node_b)
     detail, exclusive, stated = {}, [], 0
@@ -209,11 +216,9 @@ def _excludes_cross_hit(node_a: dict, node_b: dict) -> list[dict]:
 def _conflict_signals(node_a: dict, node_b: dict, axis_level: str,
                       axis_shared_count: int, similarity: float,
                       exclude_hits: list[dict]) -> list[dict]:
-    """C4：收集**客观可核**的分歧信号。一个都没有就不该碰。
+    """C4：收集客观可核的强分歧信号，作为后续模型判断的线索。
 
-    旧版没有这一层：只要没被 C1～C3 否证就放行，等于默认「分歧存在」。
-    实际上「两人在同一话题下各说一句话」是最常见的情形，绝大多数并无分歧。
-    这里要求分歧必须留下可验证的痕迹，把举证责任从模型前移到结构化字段。
+    没命中不代表没有有价值的关联；模型仍可基于互补、条件边界或共同前提提问。
     """
     signals: list[dict] = []
     stance_a, stance_b = _stance_of(node_a), _stance_of(node_b)
@@ -259,17 +264,17 @@ def _conflict_signals(node_a: dict, node_b: dict, axis_level: str,
 
 
 def screen_pair(node_a: dict, node_b: dict) -> dict:
-    """按必要条件合取判定一对节点能否进入模型碰撞判定。
+    """拦截明显无关或近乎重复的配对，其余交给模型做关系判定。
 
     返回 {"collidable": bool, "code": str, "reason": str, "signals": {...}}
     collidable=False 时调用方应直接返回 no_result，不消耗模型调用。
 
-    闸门顺序（全部为必要条件，任一不满足即拒）：
+    闸门顺序：
       C1 争议对象对齐        axis_mismatch
-      C2 适用条件有重叠      conditions_exclusive
-      C3 主张方向可冲突      stance_incomparable
       C5 观点不高度相似      claims_too_similar
-      C4 至少一个分歧信号    no_conflict_signal
+
+    C2 条件差异、C3 描述/建议差异、C4 缺少强冲突信号现在只作为关系线索，
+    不再一刀切拒绝；它们可能形成条件边界、互补解释或共同盲点问题。
     """
     signals: dict = {}
 
@@ -287,12 +292,9 @@ def screen_pair(node_a: dict, node_b: dict) -> dict:
     # ---- C2 适用条件 ----
     cond_ok, cond_detail = _conditions_overlap(node_a, node_b)
     signals["conditions"] = cond_detail
-    if not cond_ok:
-        return {
-            "collidable": False, "code": "conditions_exclusive",
-            "reason": "这两个观点面向的不是同一类人，各自的适用范围没有重叠，碰撞结论会失真。",
-            "signals": signals,
-        }
+    signals["conditions"]["relation_hint"] = (
+        "different_conditions" if not cond_ok else "overlapping_conditions"
+    )
 
     # ---- C3 主张方向 ----
     stance_a, stance_b = _stance_of(node_a), _stance_of(node_b)
@@ -300,13 +302,7 @@ def screen_pair(node_a: dict, node_b: dict) -> dict:
     compatible = _STANCE_MATRIX.get(pair, _STANCE_MATRIX.get((pair[1], pair[0]), True))
     signals["stance"] = {"a": stance_a, "b": stance_b, "conflict_possible": compatible}
     if not compatible:
-        descriptive_side = "前者" if stance_a == "descriptive" else "后者"
-        return {
-            "collidable": False, "code": "stance_incomparable",
-            "reason": f"{descriptive_side}只是在描述现象，另一方在主张该不该做，两者不在同一个裁决平面上，"
-                      "更像补充说明而不是分歧。",
-            "signals": signals,
-        }
+        signals["stance"]["relation_hint"] = "description_and_recommendation"
 
     # ---- C5 观点相似度：高度相似即共识，不是分歧 ----
     similarity = _jaccard(_bigrams(_text_of(node_a)), _bigrams(_text_of(node_b)))
@@ -322,7 +318,7 @@ def screen_pair(node_a: dict, node_b: dict) -> dict:
             "signals": signals,
         }
 
-    # ---- C4 分歧信号：必须至少命中一个客观证据 ----
+    # ---- C4 分歧/关联信号：用于提示模型，不再作为硬拒绝条件 ----
     exclude_hits = _excludes_cross_hit(node_a, node_b)
     signals["excludes_cross_hit"] = exclude_hits
     signals["strength"] = {"a": node_a.get("strength"), "b": node_b.get("strength")}
@@ -331,17 +327,19 @@ def screen_pair(node_a: dict, node_b: dict) -> dict:
         int(axis_detail.get("shared_count") or 0), similarity, exclude_hits,
     )
     signals["conflict_signals"] = conflict
-    if not conflict:
-        return {
-            "collidable": False, "code": "no_conflict_signal",
-            "reason": "这两个观点虽然在谈同一件事，但找不到任何实质分歧的迹象——"
-                      "双方都没有排除对方的做法，主张方向也不相反，更像是各说一面。",
-            "signals": signals,
-        }
+    # 与 render_screen 用同一套强弱口径：弱信号（仅靠相似度推断的「同轴异答」）
+    # 不足以把配对定性为冲突，否则下游会按二选一来提问，丢掉互补类的价值。
+    strong = [item for item in conflict if item.get("code") in STRONG_CONFLICT_CODES]
+    signals["relation_basis"] = (
+        "conflict" if strong else
+        "different_conditions" if not cond_ok else
+        "complementary_perspectives"
+    )
 
     return {
         "collidable": True,
-        "code": "direct_conflict_candidate" if exclude_hits else "candidate",
+        "code": ("direct_conflict_candidate" if exclude_hits else
+                 "candidate" if strong else "related_candidate"),
         "reason": "",
         "signals": signals,
     }
@@ -355,6 +353,8 @@ def render_screen(signals: dict) -> str:
         lines.append(f"- 争议对象已对齐（两边登记为同一对象）：{axis.get('a')}")
     elif axis.get("level") == "overlap":
         lines.append(f"- 争议对象措辞不同但有重叠：A「{axis.get('a')}」/ B「{axis.get('b')}」")
+    elif axis.get("level") == "semantic":
+        lines.append("- 登记的争议对象措辞没有直接对齐，但两段完整观点共享多个有效概念，请结合原文判断具体关联")
     elif axis.get("level") == "fallback":
         lines.append("- 两侧至少一方没有登记争议对象，对齐结论较弱，请自行确认是否真在裁决同一件事")
 
@@ -386,4 +386,9 @@ def render_screen(signals: dict) -> str:
     conflict = signals.get("conflict_signals") or []
     if conflict:
         lines.append("- 已命中的客观分歧信号：" + "；".join(item["detail"] for item in conflict))
+    # 只有强信号才足以支撑「这是一组冲突」的结论。没有强信号时——无论是完全没命中，
+    # 还是只命中了靠相似度推断的弱信号——都要提示模型继续考虑关联类关系，
+    # 否则弱信号会被当成冲突证据，重新把互补型配对挤回二选一的老路。
+    if not any(item.get("code") in STRONG_CONFLICT_CODES for item in conflict):
+        lines.append("- 未命中强冲突信号，但两边讨论对象相关；请继续判断是否存在互补、适用边界或共同盲点")
     return "\n".join(lines)

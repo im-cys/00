@@ -12,7 +12,7 @@
   const openCommentPanels = new Set();
   const requestedComments = new URLSearchParams(location.search).get('comments');
   if (requestedComments) openCommentPanels.add(requestedComments);
-  let community = { answers: {}, questions: {}, session: { user: null, configured: false, demoMode: true } };
+  let community = { answers: {}, questions: {}, session: { user: null, configured: false } };
 
   function answerStats(answer) {
     const live = community.answers[answer.id] || {};
@@ -260,7 +260,7 @@
 
   function startLogin() {
     if (community.session.user) return true;
-    if (!community.session.configured && !community.session.demoMode && !community.session.testPasswordAuthEnabled) {
+    if (!community.session.configured) {
       alert('知乎登录尚未配置。请先申请知乎授权应用并在服务端填写凭据。');
       return false;
     }

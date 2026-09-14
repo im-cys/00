@@ -28,17 +28,9 @@
 
 `npm run dev` 会同时启动 Python 生成服务和 Node 页面服务，使用本地文件存储，不读写 CloudBase。结束时执行 `npm run dev:stop`。
 
-## 临时多账号测试登录
+## 登录
 
-为验证不同账号之间的发布、评论、点赞和数据持久化，登录页临时提供「用户名 + 密码」的创建与登录入口，同时保留知乎 OAuth。密码使用 scrypt 加盐哈希存储，不保存明文。
-
-开关为 `TEST_PASSWORD_AUTH_ENABLED`；当前测试阶段默认开启。测试结束后先在环境变量中设为 `false`，再移除以下临时内容：
-
-- `/api/auth/test/register` 与 `/api/auth/test/login`；
-- `server/test-auth.mjs` 和登录页的测试表单；
-- PostgreSQL `test_accounts` 表。
-
-真实环境首次部署前需执行更新后的 [`database/schema.sql`](database/schema.sql)，否则 CloudBase 无法创建测试账号。
+站点只支持知乎 OAuth 授权登录。服务端需要配置知乎开放平台的 AppID、AppKey、Access Secret 和回调地址，具体见 [`docs/CLOUDBASE_DEPLOY.md`](docs/CLOUDBASE_DEPLOY.md)。
 
 启动脚本只从当前新版项目的 `private-data/data.js` 导入回答数据，并可从 `private-data/.env` 读取本地模型配置，不再扫描或依赖同级旧代码目录。也可显式指定：
 

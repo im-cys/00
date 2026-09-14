@@ -3,13 +3,8 @@
 
 全部用 mock 替掉 call_llm_resilient，零网络调用，只验证闸门逻辑本身。
 
-本文件的存在理由：v4 之前引擎侧只有「三项举证非空」和「superficial 拦截」
-两道实质闸门，通过率过高。这里逐项锁住收紧后的行为，防止回退。
-
-最重要的回归项是 test_consensus_support_is_not_productive：
-「共识支撑」曾同时不在 NON_PRODUCTIVE 和 CONFLICT_TYPES 里，于是它既不走
-no_result、也不需要举证，成了绕过全部实质闸门的直通车——而它的定义恰恰是
-「表面像分歧，实则共享同一判断」，也就是最典型的无价值碰撞。
+本文件锁住两类边界：冲突类仍须完成实质分歧举证，互补与共识类只要双方原文
+都能支撑共同对象，也可以继续生成适用边界、组合方法或共同盲点问题。
 """
 
 import json
@@ -199,17 +194,22 @@ class CollideGateTest(unittest.TestCase):
 
     # ---------------- 不产出问题的关系 ----------------
 
-    def test_consensus_support_is_not_productive(self):
-        """回归：共识支撑必须走 no_result，不能绕过实质闸门直接 published。"""
+    def test_consensus_support_can_raise_a_shared_blind_spot_question(self):
+        """共识只要有双方原文依据，也能继续追问共同盲点。"""
         out = run(relation(relation_type=CONSENSUS))
-        self.assertEqual(out["status"], "no_result")
+        self.assertEqual(out["status"], "published", out["reason"])
         self.assertEqual(out["relation_type"], CONSENSUS)
-        self.assertIsNone(out["question"])
+        self.assertTrue(out["question"])
 
-    def test_complementary_refinement_is_not_productive(self):
+    def test_complementary_refinement_can_raise_a_boundary_question(self):
         out = run(relation(relation_type="互补细化"))
+        self.assertEqual(out["status"], "published", out["reason"])
+        self.assertTrue(out["question"])
+
+    def test_related_view_without_two_sided_evidence_is_rejected(self):
+        out = run(relation(relation_type="互补细化", evidence=[GOOD_EVIDENCE[0]]))
         self.assertEqual(out["status"], "no_result")
-        self.assertIsNone(out["question"])
+        self.assertIn("双方原文依据", out["reason"])
 
     def test_no_relation_is_not_productive(self):
         out = run(relation(relation_type="无有效关系"))
