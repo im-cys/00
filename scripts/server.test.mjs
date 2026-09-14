@@ -11,18 +11,26 @@ test('优先识别知乎黑客松标准回调变量名', async () => {
   const previous = process.env.ZHIHU_OAUTH_REDIRECT_URI;
   const previousLegacy = process.env.ZHIHU_REDIRECT_URI;
   const previousCloudbaseKey = process.env.CLOUDBASE_APIKEY;
+  const previousSecretId = process.env.CLOUDBASE_SECRETID;
+  const previousSecretKey = process.env.CLOUDBASE_SECRETKEY;
   process.env.ZHIHU_OAUTH_REDIRECT_URI = 'https://example.test/new-callback';
   process.env.ZHIHU_REDIRECT_URI = 'https://example.test/legacy-callback';
   process.env.CLOUDBASE_APIKEY = 'server-api-key';
+  process.env.CLOUDBASE_SECRETID = 'secret-id';
+  process.env.CLOUDBASE_SECRETKEY = 'secret-key';
   try {
     const config = await configuration();
     assert.equal(config.zhihuAuth.redirectUri, 'https://example.test/new-callback');
     assert.equal(config.cloudbaseApiKey, 'server-api-key');
+    assert.equal(config.cloudbaseSecretId, 'secret-id');
+    assert.equal(config.cloudbaseSecretKey, 'secret-key');
   }
   finally {
     if (previous === undefined) delete process.env.ZHIHU_OAUTH_REDIRECT_URI; else process.env.ZHIHU_OAUTH_REDIRECT_URI = previous;
     if (previousLegacy === undefined) delete process.env.ZHIHU_REDIRECT_URI; else process.env.ZHIHU_REDIRECT_URI = previousLegacy;
     if (previousCloudbaseKey === undefined) delete process.env.CLOUDBASE_APIKEY; else process.env.CLOUDBASE_APIKEY = previousCloudbaseKey;
+    if (previousSecretId === undefined) delete process.env.CLOUDBASE_SECRETID; else process.env.CLOUDBASE_SECRETID = previousSecretId;
+    if (previousSecretKey === undefined) delete process.env.CLOUDBASE_SECRETKEY; else process.env.CLOUDBASE_SECRETKEY = previousSecretKey;
   }
 });
 

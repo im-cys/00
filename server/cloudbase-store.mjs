@@ -1,4 +1,4 @@
-import cloudbase from '@cloudbase/js-sdk';
+import cloudbase from '@cloudbase/node-sdk';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 const hash = value => createHash('sha256').update(String(value)).digest('hex');
@@ -11,7 +11,13 @@ const toggleActions = new Set(['upvote', 'like', 'favorite']);
 
 export function createCloudbaseStore(config) {
   const env = config.cloudbaseEnv || cloudbase.SYMBOL_CURRENT_ENV;
-  const app = cloudbase.init({ env, accessKey: config.cloudbaseApiKey || undefined });
+  const hasSecretPair = Boolean(config.cloudbaseSecretId && config.cloudbaseSecretKey);
+  const app = cloudbase.init({
+    env,
+    timeout: 30000,
+    ...(hasSecretPair ? { secretId: config.cloudbaseSecretId, secretKey: config.cloudbaseSecretKey } : {}),
+    ...(!hasSecretPair && config.cloudbaseApiKey ? { accessKey: config.cloudbaseApiKey } : {})
+  });
   const db = app.rdb();
 
   async function upsert(table, value, onConflict) {
