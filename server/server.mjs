@@ -206,6 +206,11 @@ export function createServer(config, store) {
       }
 
       const vendorFile = /^\/web\/vendor\/katex\/(?:katex\.min\.(?:js|css)|fonts\/KaTeX_[\w-]+\.(?:woff2?|ttf))$/.test(path) ? path.slice(1) : '';
+      const pageRequest = path === '/' || path === '/question.html' || /^\/question\/[\w-]+$/.test(path);
+      if (req.method === 'GET' && pageRequest && !await currentUser(req)) {
+        const returnTo = safeReturnTo(req.url);
+        res.writeHead(302, { Location: `/auth/zhihu?return_to=${encodeURIComponent(returnTo)}`, 'Cache-Control': 'no-store' }); return res.end();
+      }
       if (req.method === 'GET' && (files.has(path) || /^\/question\/[\w-]+$/.test(path) || vendorFile)) {
         const file = vendorFile || files.get(path) || 'web/question.html'; const data = await readFile(resolve(root, file));
         const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf' }[extname(file)] || 'application/octet-stream';

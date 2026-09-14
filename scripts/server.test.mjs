@@ -68,6 +68,28 @@ test('知乎授权跳转使用官方 app_id 参数并把 state 绑定到浏览�
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
 
+test('未登录访问页面时先跳转知乎授权，登录用户可直接进入', async () => {
+  let loggedIn = false;
+  const store = { session: async () => loggedIn ? { id: 'zhihu-test', name: '测试用户' } : null };
+  const config = {
+    allowedHosts: ['127.0.0.1'], allowedOrigins: [], collideBase: 'http://127.0.0.1:3311', useDatabase: false, aiModel: 'deepseek-v4-pro',
+    zhihuAuth: { configured: true, demoMode: false, redirectUri: 'https://example.test/auth/zhihu/callback' }
+  };
+  const server = createServer(config, store);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const { port } = server.address(); const base = `http://127.0.0.1:${port}`;
+    const guarded = await fetch(`${base}/question/10001?from=home`, { redirect: 'manual' });
+    assert.equal(guarded.status, 302);
+    assert.equal(guarded.headers.get('location'), '/auth/zhihu?return_to=%2Fquestion%2F10001%3Ffrom%3Dhome');
+    const asset = await fetch(`${base}/web/styles.css`, { redirect: 'manual' });
+    assert.equal(asset.status, 200, '静态资源不能被登录守卫拦截');
+    loggedIn = true;
+    const allowed = await fetch(`${base}/question/10001?from=home`, { headers: { Cookie: 'qm_session=test' }, redirect: 'manual' });
+    assert.equal(allowed.status, 200);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
 test('受保护导入接口写入存储后，网页内容脚本从存储读取', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'answer-collision-import-'));
   const store = createCommunityStore(join(dir, 'store.json'));
