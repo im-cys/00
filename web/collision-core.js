@@ -18,13 +18,31 @@
     slots[index]=answerId||null;
     return {...workspace,slots};
   }
+  function mergeAnswers(workspace,answerIds,maximum=5){
+    const incoming=[...new Set((answerIds||[]).filter(Boolean))];
+    const selected=[...new Set([...(workspace.selected||[]),...incoming])];
+    if(selected.length>maximum)throw new Error(`一个工作区最多保留 ${maximum} 篇回答。`);
+    const slots=[...(workspace.slots||[]),null,null].slice(0,2).map(id=>selected.includes(id)?id:null);
+    for(const id of incoming){
+      if(slots.includes(id))continue;
+      const free=slots.indexOf(null);
+      if(free<0)break;
+      slots[free]=id;
+    }
+    const reader=selected.includes(workspace.reader)?workspace.reader:(selected[0]||null);
+    return {...workspace,selected,slots,reader};
+  }
+  function preferredSlot(workspace){
+    const free=(workspace.slots||[]).findIndex(id=>!id);
+    return free>=0?free:1;
+  }
   function validatePair(questionId,refs,lookup){
     if(refs.length!==2 || refs[0].answerId===refs[1].answerId)return '请选择两篇不同回答的节点。';
     for(const ref of refs){
       if(ref.answerId.split('-')[0]!==questionId)return '只能碰撞同一问题下的回答。';
       const node=lookup(ref);
       if(!node)return '节点不存在，请重新选择。';
-      if(node.type!=='claim')return '本版先支持两个观点节点碰撞，其他类型可查看原文。';
+      if(node.collidable!==true && node.kind!=='collision')return '请选择观点树最末层的可碰撞观点。';
     }
     return null;
   }
@@ -77,25 +95,11 @@
     });
     return {eligibility:details.every(item=>item.found)?'eligible':'needs_evidence',details};
   }
-  const stopGrams = new Set(['因为','所以','我们','他们','一个','这个','那个','可以','不是','就是','非常','其实','已经','如果','但是','而且','这样','那样','的话','时候','东西','方面','情况','自己','没有','还是','什么','怎么','这些','那些','之后','之前','一样','觉得','认为','应该','需要','真的','很多','一些','出来','起来','下去','而是','只是','因此','以及','或者','然后','当然','其中']);
-  function terms(text){
-    const source=String(text ?? '').toLowerCase();
-    const found=new Set();
-    for(const word of source.match(/[a-z][a-z0-9+#._-]*/g)||[])if(word.length>1)found.add(word);
-    for(const run of source.replace(/[^\u3400-\u9fff]+/g,' ').split(' ').filter(Boolean))
-      for(let at=0;at+2<=run.length;at+=1){const gram=run.slice(at,at+2);if(!stopGrams.has(gram))found.add(gram);}
-    return found;
-  }
-  function sharedTerms(left,right){const both=[];for(const term of left)if(right.has(term))both.push(term);return both;}
-  function evaluateCollision(refs,nodeOf,action){
-    const nodes=refs.map(nodeOf);
-    if(nodes.some(node=>!node))return {outcome:'no_result',code:'missing_node',message:'节点已不可用，请重新选择两个观点。',shared:[]};
-    const shared=sharedTerms(terms(`${nodes[0].text} ${nodes[0].scope||''}`),terms(`${nodes[1].text} ${nodes[1].scope||''}`));
-    if(shared.length<2)return {outcome:'no_result',code:'different_subject',message:'这两个节点几乎没有共同的讨论对象，本地规则给不出可靠的比较起点。可以换一组更贴近的节点，或先读两边原文。',shared};
-    if(action==='synthesize'&&shared.length<3)return {outcome:'no_result',code:'insufficient_evidence',message:'两句话的共同点太少，把它们拼成一条综合判断会超出原文能支持的范围。可以先试“对比差异”，或选择更具体的节点。',shared};
-    return {outcome:'candidate',code:null,message:'',shared};
-  }
-  const api={keyOf,pairKey,transition,assignSlot,validatePair,validateDraft,locateQuote,evidenceCheck,evaluateCollision,terms,size,LIMITS};
+  /* 语义层判定不在前端做。可碰撞判定由服务端 extractor/pair_screen.py 承担：
+     它按「争议对象对齐 ∧ 适用条件有重叠 ∧ 主张方向可冲突」逐项检查结构化字段，
+     零模型调用即可给出可解释的拒绝理由。前端只保留结构校验（validatePair），
+     避免两套语义规则各自漂移。 */
+  const api={keyOf,pairKey,transition,assignSlot,mergeAnswers,preferredSlot,validatePair,validateDraft,locateQuote,evidenceCheck,size,LIMITS};
   if(typeof module!=='undefined'&&module.exports)module.exports=api;
   global.CollisionCore=api;
 })(typeof window!=='undefined'?window:globalThis);

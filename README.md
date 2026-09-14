@@ -1,6 +1,6 @@
 # 回答节点碰撞试用站
 
-这是一个把同一问题下的不同回答拆成观点节点、对照节点并生成新问题的试用项目。Node 后端通过 CloudBase SDK 使用 PostgreSQL；Python 服务调用 OpenAI 兼容模型生成结构图与碰撞问题。
+这是一个把同一问题下的回答拆成完整观点树、选择末层观点进行碰撞并生成新问题的试用项目。Node 后端通过 CloudBase SDK 使用 PostgreSQL；Python 服务调用 OpenAI 兼容模型生成结构图与碰撞问题。
 
 ## 目录
 
@@ -22,16 +22,41 @@
 要求 Node.js 22+ 和 Python 3.11+。
 
 1. 复制 `.env.example` 为 `.env`，按需填写模型配置。
-2. 双击 `启动服务.cmd`，或执行 `npm start`。
-3. 打开 `http://127.0.0.1:3210`。
+2. 将本地回答数据放在 `private-data/data.js`。
+3. 执行 `npm run dev`，或双击 `启动本地环境.cmd`。
+4. 打开 `http://127.0.0.1:3210`。
 
-需要完整碰撞链路时，双击 `启动自测环境.cmd`。它会同时启动 Python 碰撞服务和 Node 页面服务。
+`npm run dev` 会同时启动 Python 生成服务和 Node 页面服务，使用本地文件存储，不读写 CloudBase。结束时执行 `npm run dev:stop`。
+
+## 临时多账号测试登录
+
+为验证不同账号之间的发布、评论、点赞和数据持久化，登录页临时提供「用户名 + 密码」的创建与登录入口，同时保留知乎 OAuth。密码使用 scrypt 加盐哈希存储，不保存明文。
+
+开关为 `TEST_PASSWORD_AUTH_ENABLED`；当前测试阶段默认开启。测试结束后先在环境变量中设为 `false`，再移除以下临时内容：
+
+- `/api/auth/test/register` 与 `/api/auth/test/login`；
+- `server/test-auth.mjs` 和登录页的测试表单；
+- PostgreSQL `test_accounts` 表。
+
+真实环境首次部署前需执行更新后的 [`database/schema.sql`](database/schema.sql)，否则 CloudBase 无法创建测试账号。
+
+启动脚本只从当前新版项目的 `private-data/data.js` 导入回答数据，并可从 `private-data/.env` 读取本地模型配置，不再扫描或依赖同级旧代码目录。也可显式指定：
+
+```powershell
+.\scripts\start.ps1 -DataFile "D:\path\to\data.js" -MapsFile "D:\path\to\collision-maps.js" -ModelEnv "D:\path\to\.env"
+```
 
 运行测试：
 
 ```powershell
 npm test
 python extractor/check_config.py
+```
+
+文章拆解使用 `answer-tree-v2`：用户能看到从唯一总观点到可碰撞叶子的完整树，叶子下的支撑材料默认隐藏并可定位原文。实现约束和验收项见 [`docs/ANSWER_TREE_V2.md`](docs/ANSWER_TREE_V2.md)。没有模型配置时，可以用本地回归样例检查完整链路：
+
+```powershell
+python extractor/preview_answer_tree.py --input "<回答样本.json>" --answer-id q6_a9 --mock "<本地模型输出.json>"
 ```
 
 ## 私有内容与 GitHub

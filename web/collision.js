@@ -12,33 +12,61 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const qById = id => questions.find(q => q.id === id);
   const answer = id => qById(id?.split('-')[0])?.answers.find(a => a.id === id);
-  const node = ref => maps[ref?.answerId]?.nodes.find(n => n.id === ref.nodeId);
+  const findTreeNode = (rootNode,id) => {
+    if(!rootNode||!id)return null;
+    if(rootNode.id===id)return rootNode;
+    for(const child of rootNode.children||[]){const found=findTreeNode(child,id);if(found)return found;}
+    return null;
+  };
+  const node = ref => maps[ref?.answerId]?.nodes?.find(n => n.id === ref.nodeId)||findTreeNode(maps[ref?.answerId]?.tree,ref?.nodeId);
+  const nodeQuote = value => value?.quote||value?.sourceAnchors?.[0]?.quote||'';
+  const isCollidable = value => value?.collidable===true||value?.kind==='collision';
+  // statement 是当前字段名；text / claim_text 只为读取旧缓存保留。
+  const nodeText = value => value?.statement||value?.text||value?.claim_text||'';
+  // displayText 只负责卡片扫读；完整 statement 始终保留给详情与碰撞判断。
+  // 旧结构的 branch 没有 displayText 时优先使用完整 summary，不再把「信息与后路」类目录 title 放到卡片上。
+  const nodeDisplayText = value => value?.displayText||value?.display_text||value?.summary||nodeText(value)||value?.title||'';
+  const CONDITION_LABEL = {audience:'人群',stage:'阶段',premise:'前提'};
+  function conditionText(value){
+    const conditions=value?.conditions;
+    if(conditions&&typeof conditions==='object'){
+      const parts=Object.keys(CONDITION_LABEL)
+        .filter(key=>Array.isArray(conditions[key])&&conditions[key].length)
+        .map(key=>`${CONDITION_LABEL[key]}：${conditions[key].join('、')}`);
+      if(parts.length)return parts.join('；');
+    }
+    return Array.isArray(value?.scopes)?value.scopes.join('；'):(value?.scope||'');
+  }
   const paragraphsOf = answerId => answer(answerId)?.paragraphs?.filter(p => !p.includes('〔图片〕') && !p.includes('〔视频〕')) || [];
   const cut = (s, n = 46) => [...String(s || '')].slice(0, n).join('') + ([...String(s || '')].length > n ? '…' : '');
   const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const traceId = (()=>{try{const old=sessionStorage.getItem('answer-tree-trace-id');if(old)return old;const value=crypto.randomUUID();sessionStorage.setItem('answer-tree-trace-id',value);return value;}catch{return '';}})();
+  function trace(event,details={}){
+    const payload={event,traceId,questionId:document.body.dataset.questionId||'',...details};
+    void fetch('/api/local/trace',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),keepalive:true}).catch(()=>{});
+  }
   async function apiJson(response, fallback = '服务暂时不可用，请稍后重试。') {
     const text = await response.text();
     try { return text ? JSON.parse(text) : {}; }
     catch { throw new Error(fallback); }
   }
   async function generateMap(answerId) {
-    let response=await fetch('/api/maps/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({answerId})});
+    let response=await fetch('/api/maps/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({answerId,traceId})});
     let result=await apiJson(response,'生成服务响应超时，请稍后重试。');
     if(response.status===401){window.ZhihuDemoCommunity?.requireAccount?.();throw new Error('请先登录。');}
     if(!response.ok&&response.status!==202)throw new Error(result.error||'结构图生成失败。');
-    for(let attempt=0;(response.status===202||result.status==='processing')&&attempt<180;attempt++){
+    for(let attempt=0;(response.status===202||result.status==='processing')&&attempt<450;attempt++){
       await wait(2000);
       response=await fetch(`/api/maps/generate?answerId=${encodeURIComponent(answerId)}`);
       result=await apiJson(response,'无法读取生成进度，请稍后重试。');
       if(response.status===401){window.ZhihuDemoCommunity?.requireAccount?.();throw new Error('请先登录。');}
       if(!response.ok&&response.status!==202)throw new Error(result.error||'结构图生成失败。');
     }
-    if(!result.map)throw new Error('生成等待超时，请稍后重试。');
+    if(!result.map)throw new Error('本次生成超过 15 分钟，请重新生成。');
     return result;
   }
   const when = value => value ? new Date(value).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
   const names = {draft:'私有草稿',pending:'待审核',returned:'已退回',published:'已公开',withdrawn:'已撤回',hidden:'已下架',discarded:'已放弃'};
-  const types = {claim:'观点',fact:'事实陈述',experience:'经验',method:'方法'};
   const actions = {contrast:'交锋',synthesize:'合流'};
   // 动作内化后，卡片上展示 AI 判定的关系类型；旧数据回退到动作名。
   const tagOf = item => item.relationType || actions[item.action] || '碰撞';
@@ -52,6 +80,7 @@
     arrow:'<path d="M5 12h14m-5-5 5 5-5 5"/>',
     book:'<path d="M12 5c-4-3-9-2-9-2v16s5-1 9 2c4-3 9-2 9-2V3s-5-1-9 2v16"/>',
     check:'<path d="m5 12 4 4L19 6"/>',
+    trash:'<path d="M4 7h16M10 11v6m4-6v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>',
     alert:'<path d="M12 4 2.5 20h19Z"/><path d="M12 10v4m0 3v.5"/>',
     shield:'<path d="m12 3 8 3v6c0 5-8 9-8 9S4 17 4 12V6Z"/><path d="m8 12 3 3 5-6"/>'
   };
@@ -62,7 +91,7 @@
   const KEY = 'zhihu-collision-mvp-v3';
   const STALE_KEYS = ['zhihu-collision-mvp-v1','zhihu-collision-mvp-v2'];
   let storageError = false;
-  let state = {version:3,items:[],comments:{},workspaces:{},follows:[],jobs:[],issues:[]};
+  let state = {version:3,items:[],comments:{},workspaces:{},follows:[],jobs:[],issues:[],opened:[]};
   function loadState() {
     let saved = null;
     try {
@@ -77,7 +106,8 @@
       workspaces:saved.workspaces&&typeof saved.workspaces==='object'?saved.workspaces:{},
       follows:Array.isArray(saved.follows)?saved.follows:[],
       jobs:Array.isArray(saved.jobs)?saved.jobs:[],
-      issues:Array.isArray(saved.issues)?saved.issues:[]};
+      issues:Array.isArray(saved.issues)?saved.issues:[],
+      opened:Array.isArray(saved.opened)?saved.opened:[]};
     state.items = state.items.filter(i => i && qById(i.questionId) && Array.isArray(i.refs) && i.refs.length === 2 && i.refs.every(r => node(r)) && names[i.status])
       .map(i => ({eligibility:'eligible',revisions:[],reviews:[],...i}));
     for(const [id,list] of Object.entries(state.comments))
@@ -95,8 +125,9 @@
   const dialog = document.createElement('dialog'); dialog.className = 'co-dialog'; document.body.append(dialog);
   const toastEl = document.createElement('div'); toastEl.className = 'co-toast'; toastEl.setAttribute('role','status'); toastEl.hidden = true; document.body.append(toastEl);
   let toastTimer, wb = null, pair = [], selection = new Set(), selectedQuestion = null, collisionRefs = [], collisionAction = 'contrast',
-      editor = null, dirty = false, modalKind = '', lastFocus = null, shelfTab = 'draft', sourceReturn = null, dragRef = null, draggedAnswerId = null, ballPointerDrag = null, canvasPointerDrag = null, suppressBallClickId = null, reviewerMode = false, selectMode = false;
+      editor = null, dirty = false, modalKind = '', lastFocus = null, shelfTab = 'draft', sourceReturn = null, dragRef = null, dropReject = null, draggedAnswerId = null, ballPointerDrag = null, canvasPointerDrag = null, suppressBallClickId = null, nodeClickTimer = null, reviewerMode = false, selectMode = false, firstFind = false;
   const mapViews = new Map();
+  const mapGeneration = new Map();
   const expandedDiscoveries = new Set();
   // 碰撞已接入真实模型链路（关系判定 + 提问 + evidence 回查），不再是模板规则。
   // “公开”是本站公开，不会自动发布到知乎。
@@ -105,7 +136,7 @@
   function openModal(title, subtitle, body, footer='', wide=false, kind='') {
     if(!dialog.open)lastFocus=document.activeElement;
     modalKind=kind; dirty=false;
-    dialog.className=`co-dialog ${wide?'wide':''}`;
+    dialog.className=`co-dialog ${wide?'wide':''}${firstFind?' is-first-find':''}`;
     dialog.innerHTML=`<header class="co-dialog-head"><div><h2 id="co-modal-title">${esc(title)}</h2><div class="co-muted">${esc(subtitle)}</div></div><button class="co-iconbtn" data-co="close-modal" aria-label="关闭弹窗">${icon('close')}</button></header><div class="co-dialog-body">${body}</div>${footer?`<footer class="co-dialog-footer">${footer}</footer>`:''}`;
     dialog.setAttribute('aria-labelledby','co-modal-title');
     if(!dialog.open)dialog.showModal();
@@ -137,13 +168,25 @@
   function insightCard(item,compact=false) {
     return `<button class="co-feed-insight" data-co="detail" data-id="${esc(item.id)}">${icon('spark')}<strong>${esc(item.title)}</strong><span class="co-muted">本站公开 · ${tagOf(item)} · ${item.refs.map(r=>esc(answer(r.answerId)?.author)).join(' × ')} · ${countComments(item.id)} 条讨论${compact?'':'　查看发现 →'}</span></button>`;
   }
+  // 延申问题的统一说明文案：首页与问题页共用，避免两处叫法不一致。
+  const DISCOVERY_HINT='延申问题：由同一问题下两篇不同回答的观点碰撞后，延申生成的新问题。';
+  // 来源行统一写成“基于 XX 答主与 XX 答主回答延申出来的 · 首次发现人：XXX”，答主可点击直达其回答。
+  function discoveryMeta(item){
+    const links=item.refs.map(r=>{
+      const a=answer(r.answerId);
+      if(!a)return '';
+      return `<button type="button" class="co-author-link" data-co="jump-answer" data-aid="${esc(r.answerId)}" title="前往 ${esc(a.author)} 的回答">${esc(a.author)}</button> 答主`;
+    }).filter(Boolean);
+    const base=links.length?`基于 ${links.join(' 与 ')} 回答延申出来的`:'基于本问题下的回答延申出来的';
+    return `<small class="co-discovery-meta"><span>${base}</span><i>首次发现人：${esc(item.author)}</i></small>`;
+  }
   function homeInsightPanel(items) {
-    return `<section class="co-feed-discoveries" aria-label="公开节点生成的新问题">
+    return `<section class="co-feed-discoveries" aria-label="延申问题">
       <header class="co-feed-discoveries-head">
-        <div><span class="co-feed-discoveries-icon">${icon('spark')}</span><strong>公开节点</strong><span class="co-muted">从不同回答中生成的新问题</span></div>
-        <span class="co-feed-discoveries-count">2 个新节点</span>
+        <div><span class="co-feed-discoveries-icon">${icon('spark')}</span><strong>延申问题</strong><span class="co-muted">由两篇回答碰撞延申出的新问题</span></div>
+        <span class="co-feed-discoveries-count">${items.length} 条</span>
       </header>
-      <div class="co-feed-discoveries-list">${items.map((item,index)=>{const anchor=`insight-${item.id}-${item.refs[0]?.answerId||''}`;return `<a class="co-feed-question" href="/question/${esc(item.questionId)}?focusInsight=${encodeURIComponent(item.id)}#${esc(anchor)}"><span class="co-feed-question-index">${index+1}</span><span><strong>${esc(item.title)}</strong><small>${item.refs.map(r=>esc(answer(r.answerId)?.author)).join(' × ')} · 发现人 ${esc(item.author)} · 前往问题 →</small></span></a>`;}).join('')}</div>
+      <div class="co-feed-discoveries-list">${items.map((item,index)=>{const anchor=`insight-${item.id}-${item.refs[0]?.answerId||''}`;const href=`/question/${esc(item.questionId)}?focusInsight=${encodeURIComponent(item.id)}#${esc(anchor)}`;return `<div class="co-feed-question"><span class="co-feed-question-index">${index+1}</span><span><a class="co-discovery-title" href="${href}">${esc(item.title)}</a>${discoveryMeta(item)}<a class="co-discovery-go" href="${href}">前往问题 →</a></span></div>`;}).join('')}</div>
     </section>`;
   }
   function questionDiscoveryItems(qid){
@@ -151,23 +194,25 @@
   }
   function inlineDiscoveryDetail(item){
     const comments=visibleComments(item.id);
-    const analysis=cut(item.relationText||item.rationale||'这个问题来自两篇回答中不同的判断前提。',180);
+    const analysis=item.relationText||item.rationale||'这个问题来自两篇回答中不同的判断前提。';
+    // 外层 summary 已经显示过问题标题，展开里再重复一次没有信息量。
+    // 没有详情说明时整段不渲染——降级回标题等于把要替换掉的重复内容又放回来。
+    const detail=questionDetailHtml(item,'co-inline-question-detail');
     return `<div class="co-inline-detail" ${expandedDiscoveries.has(item.id)?'':'hidden'}>
-      <div class="co-inline-nodes">${item.refs.map((ref,index)=>{const n=node(ref),a=answer(ref.answerId);return `<section><span>节点 ${index?'B':'A'} · ${esc(a?.author||'未知作者')}</span><p>${esc(n?.text||'暂无节点摘要')}</p></section>`;}).join('')}</div>
-      <section class="co-inline-analysis"><strong>AI 分析</strong><p>${esc(analysis)}</p></section>
-      <section class="co-inline-comments"><div class="co-between"><strong>评论区 · ${comments.length}</strong><span class="co-muted">两个来源共用</span></div><ol>${comments.slice(0,3).map(c=>`<li><b>${esc(c.author)}</b><span>${esc(c.text)}</span></li>`).join('')||'<li class="co-muted">还没有评论，可以补充回答或指出前提。</li>'}</ol><form class="co-comment-form co-inline-comment-form" data-inline="true" data-insight="${esc(item.id)}"><textarea class="co-comment-input" name="comment" rows="2" maxlength="${L.comment}" placeholder="围绕这个问题评论…" aria-label="发现评论" required></textarea><button type="submit" class="co-btn primary">发布</button></form></section>
+      <section class="co-inline-analysis"><strong>AI 分析</strong>${collisionAnalysisHtml(analysis)}</section>
+      ${detail?`<section class="co-inline-question"><span>关于这个问题</span>${detail}</section>`:''}
+      <section class="co-inline-comments"><div class="co-between"><strong>围绕这个问题讨论 · ${comments.length}</strong></div><ol>${comments.slice(0,3).map(c=>`<li><b>${esc(c.author)}</b><span>${esc(c.text)}</span></li>`).join('')||'<li class="co-muted">还没有讨论，可以补充回答或指出前提。</li>'}</ol><form class="co-comment-form co-inline-comment-form" data-inline="true" data-insight="${esc(item.id)}"><textarea class="co-comment-input" name="comment" rows="2" maxlength="${L.comment}" placeholder="围绕这个问题评论…" aria-label="发现评论" required></textarea><button type="submit" class="co-btn primary">发布</button></form></section>
     </div>`;
   }
   function inlineDiscoveryItem(item,contextId='question'){
     const expanded=expandedDiscoveries.has(item.id);
-    const authors=item.refs.map(r=>answer(r.answerId)?.author).filter(Boolean).join(' × ');
     const domId=`insight-${item.id}-${contextId}`;
-    return `<article class="co-discovery-item${expanded?' is-expanded':''}" id="${esc(domId)}" data-insight-id="${esc(item.id)}"><button class="co-discovery-summary" data-co="toggle-discovery" data-id="${esc(item.id)}" aria-expanded="${expanded}"><span class="co-discovery-spark">${icon('spark')}</span><span><strong>${esc(item.title)}</strong><small>来源回答：${esc(authors)}<i>发现人：${esc(item.author)}</i></small></span><b>${expanded?'收起':'展开'} ›</b></button>${inlineDiscoveryDetail(item)}</article>`;
+    return `<article class="co-discovery-item${expanded?' is-expanded':''}" id="${esc(domId)}" data-insight-id="${esc(item.id)}"><div class="co-discovery-summary"><span class="co-discovery-spark">${icon('spark')}</span><span><strong>${esc(item.title)}</strong>${discoveryMeta(item)}</span><b><button type="button" class="co-discovery-act" data-co="toggle-discovery" data-id="${esc(item.id)}" aria-expanded="${expanded}">${expanded?'收起':'展开'} ›</button></b></div>${inlineDiscoveryDetail(item)}</article>`;
   }
   function discoveryJumpItem(item){
     const aid=item.refs[0]?.answerId||'';
-    const authors=item.refs.map(r=>answer(r.answerId)?.author).filter(Boolean).join(' × ');
-    return `<a class="co-discovery-summary co-discovery-jump" href="/question/${esc(item.questionId)}?focusInsight=${encodeURIComponent(item.id)}#insight-${esc(item.id)}-${esc(aid)}"><span class="co-discovery-spark">${icon('spark')}</span><span><strong>${esc(item.title)}</strong><small>来源回答：${esc(authors)}<i>发现人：${esc(item.author)}</i></small></span><b>前往 ›</b></a>`;
+    const href=`/question/${esc(item.questionId)}?focusInsight=${encodeURIComponent(item.id)}#insight-${esc(item.id)}-${esc(aid)}`;
+    return `<div class="co-discovery-summary co-discovery-jump"><span class="co-discovery-spark">${icon('spark')}</span><span><a class="co-discovery-title" href="${href}">${esc(item.title)}</a>${discoveryMeta(item)}</span><b><a class="co-discovery-act" href="${href}">前往 ›</a></b></div>`;
   }
   function decorate() {
     document.querySelectorAll('.feed-item').forEach(card=>{
@@ -179,7 +224,7 @@
     document.querySelector('.co-question-discoveries')?.remove();
     if(q) {
       const items=questionDiscoveryItems(qid);
-      document.querySelector('#answerCount')?.insertAdjacentHTML('beforebegin',`<section class="co-question-discoveries co-root" id="collision-insights"><div class="co-between"><h2 class="co-section-title">${icon('spark')}本问题的碰撞问题 · ${items.length} 条</h2><span class="co-muted">点击前往相关回答的碰撞条目</span></div>${items.length?`<div class="co-discovery-list">${items.map(discoveryJumpItem).join('')}</div>`:'<div class="co-muted" style="margin-top:12px">还没有公开发现，试着选两篇回答碰撞。</div>'}</section>`);
+      document.querySelector('#answerCount')?.insertAdjacentHTML('beforebegin',`<section class="co-question-discoveries co-root" id="collision-insights"><div class="co-between"><h2 class="co-section-title">${icon('spark')}延申问题 · ${items.length} 条</h2><span class="co-muted">点击标题前往对应的延申条目</span></div><p class="co-section-hint">${DISCOVERY_HINT}</p>${items.length?`<div class="co-discovery-list co-discovery-scroll">${items.map(discoveryJumpItem).join('')}</div>`:'<div class="co-muted" style="margin-top:12px">还没有公开的延申问题，试着选两篇回答碰撞。</div>'}</section>`);
       document.querySelectorAll('.AnswerItem').forEach(card=>{
         card.querySelector('.co-association')?.remove(); card.querySelector('.co-pick')?.remove(); card.querySelector('.co-pick-hint')?.remove();
         const aid=card.dataset.answerId;
@@ -188,14 +233,12 @@
         card.classList.toggle('co-pickable',selectMode);
         card.classList.toggle('co-picked',picked);
         if(selectMode){
-          const usable=Boolean(maps[aid]);
           card.querySelector('.answer-author')?.insertAdjacentHTML('beforeend',
             `<button type="button" class="co-pick${picked?' is-picked':''}" data-co="toggle-pick" data-aid="${aid}" aria-pressed="${picked}">${picked?icon('check')+'已选择':'选择这篇'}</button>`);
-          card.insertAdjacentHTML('beforeend',`<div class="co-pick-hint co-root">${usable?(picked?'已加入节点浮窗，可继续向下挑选另一篇。':'点击卡片任意位置即可选择这篇回答。'):'这篇回答暂无结构图，选择后只能阅读原文，不能参与碰撞。'}</div>`);
           return;
         }
         const linked=items.filter(i=>i.refs.some(r=>r.answerId===aid));
-        if(linked.length)card.insertAdjacentHTML('beforeend',`<section class="co-association co-root"><div class="co-between"><strong style="font-size:13px">${icon('spark')}由这篇回答参与形成的问题 · ${linked.length} 条</strong><span class="co-muted">点击展开</span></div><div class="co-discovery-list">${linked.map(i=>inlineDiscoveryItem(i,aid)).join('')}</div></section>`);
+        if(linked.length)card.insertAdjacentHTML('beforeend',`<section class="co-association co-root"><div class="co-between"><strong style="font-size:13px">${icon('spark')}由这篇回答延申出的问题 · ${linked.length} 条</strong><span class="co-muted">点击展开</span></div><div class="co-discovery-list">${linked.map(i=>inlineDiscoveryItem(i,aid)).join('')}</div></section>`);
       });
       if(!document.querySelector('.co-question-aside'))document.querySelector('.question-layout')?.insertAdjacentHTML('beforeend',`<aside class="co-question-aside co-root"><section class="co-side-card"><h3>也可以看看</h3><ul class="co-side-links">${questions.filter(x=>x.id!==qid).slice(0,4).map(x=>`<li><a href="/question/${x.id}">${esc(x.title)}</a></li>`).join('')}</ul></section><p class="co-side-note">知乎页面模拟 · 与知乎官方无关</p></aside>`);
       focusLinkedDiscovery();
@@ -218,21 +261,18 @@
     root.querySelector('.co-select-fab')?.remove();
     const qid=document.body.dataset.questionId;
     if(!qid||selectMode)return;
-    // 历史工作区只负责恢复已经打开的节点窗，不代表下一次选择会话。
-    // 普通问题页重新进入后，入口不能继续显示上一次保存的选择数量。
-    const count=wb?.questionId===qid?wb.selected.length:0;
-    root.insertAdjacentHTML('beforeend',`<button class="co-select-fab" data-co="select" data-qid="${esc(qid)}">${icon('nodes')}<span><strong>选择回答探索</strong><small>${count?`已选择 ${count} 篇 · 点击继续管理`:'生成双节点地图'}</small></span></button>`);
+    // 每次生成后都恢复成初始入口。已打开/最小化的浮窗不改变入口文案。
+    root.insertAdjacentHTML('beforeend',`<button class="co-select-fab" data-co="select" data-qid="${esc(qid)}">${icon('nodes')}<span><strong>选择回答探索</strong><small>生成双节点地图</small></span></button>`);
   }
   /* 选择模式：用户仍在原页上下浏览，选好后直接打开右侧节点浮窗。 */
   function renderPickBar(){
     root.querySelector('.co-pickbar')?.remove();
     if(!selectMode)return;
     const qid=document.body.dataset.questionId;
-    const ready=[...selection].filter(id=>maps[id]).length;
     const names=[...selection].map(id=>cut(answer(id)?.author,8)).join('、');
     root.insertAdjacentHTML('beforeend',`<div class="co-pickbar co-root" role="region" aria-label="选择回答">
-      <div class="co-pickbar-info"><strong>选择回答探索 <em>已选 ${selection.size}</em></strong><span class="co-muted">${selection.size?esc(names):'继续浏览，点击回答卡片即可选中'}${selection.size===1?' · 再选 1 篇即可碰撞':''}${selection.size>=2&&ready<2?' · 可碰撞的结构图不足 2 张':''}</span></div>
-      <div class="co-row">${btn('退出选择','exit-select','small')}${btn('打开节点浮窗 →','start-workbench','primary'+(selection.size?'':' '),selection.size?'':'disabled')}</div>
+      <div class="co-pickbar-info"><strong>选择回答探索 <em>已选 ${selection.size}</em></strong><span class="co-muted">${selection.size?esc(names):'继续浏览，点击回答卡片即可选中'}${selection.size===1?' · 再选 1 篇即可碰撞':''}</span></div>
+      <div class="co-row">${btn('退出选择','exit-select','small')}${btn('点击生成','start-workbench','primary'+(selection.size?'':' '),selection.size?'':'disabled')}</div>
     </div>`);
   }
   function enterSelectMode(qid,aid){
@@ -244,17 +284,19 @@
     // 每次打开选择器都创建全新的临时会话。节点窗/本地存储中的历史回答
     // 不能反向预选当前页面的回答，否则关页再进仍会残留“已选”。
     selection=new Set();
-    if(aid&&selection.size<MAX_FLOATING_ANSWERS)selection.add(aid);
+    const previous=workspace(selectedQuestion.id);
+    if(aid&&(previous.selected.includes(aid)||previous.selected.length<MAX_FLOATING_ANSWERS))selection.add(aid);
     selectMode=true;
+    trace('select_mode_entered',{answerId:aid||'',selectedCount:selection.size});
     decorate();
     toast(`已进入选择模式：向下浏览回答，点击卡片选择，最多 ${MAX_FLOATING_ANSWERS} 篇。`);
   }
   function exitSelectMode(){selectMode=false;selection=new Set();selectedQuestion=null;decorate();toast('已退出选择模式，选择已清空。');}
   function togglePick(aid){
     if(!answer(aid))return;
-    if(selection.has(aid))selection.delete(aid);
-    else if(selection.size>=MAX_FLOATING_ANSWERS)return toast(`插件最多保留 ${MAX_FLOATING_ANSWERS} 篇，请先取消一篇。`);
-    else selection.add(aid);
+    if(selection.has(aid)){selection.delete(aid);trace('answer_unselected',{answerId:aid,selectedCount:selection.size});}
+    else if(new Set([...(wb?.questionId===document.body.dataset.questionId?wb.selected:workspace(document.body.dataset.questionId).selected),...selection,aid]).size>MAX_FLOATING_ANSWERS)return toast(`插件最多保留 ${MAX_FLOATING_ANSWERS} 篇，请先移除一篇。`);
+    else {selection.add(aid);trace('answer_selected',{answerId:aid,selectedCount:selection.size});}
     decorate();
   }
 
@@ -266,45 +308,89 @@
     return {questionId:qid,selected,slots:[...new Set(slots)].concat([null,null]).slice(0,2),reader:selected.includes(stored.reader)?stored.reader:selected[0],groups:stored.groups||{},mobile:stored.mobile||'maps'};
   }
   function saveWorkspace(){if(wb){state.workspaces[wb.questionId]={...wb};persist();}}
-  async function startWorkbench(){
+  async function runMapGeneration(answerId){
+    mapGeneration.set(answerId,{status:'processing',error:''});
+    trace('map_generate_started',{answerId});
+    if(wb?.selected.includes(answerId))renderWorkbench();
+    try{
+      const result=await generateMap(answerId);
+      maps[result.answerId]=result.map;
+      mapGeneration.set(answerId,{status:'ready',error:''});
+      trace('map_generate_succeeded',{answerId,nodeCount:result.map?.nodes?.length||0});
+    }catch(error){
+      mapGeneration.set(answerId,{status:'failed',error:error.message||'结构图生成失败，请稍后重试。'});
+      trace('map_generate_failed',{answerId,status:'failed'});
+    }
+    if(wb?.selected.includes(answerId))renderWorkbench();
+  }
+  function retryMapGeneration(answerId){
+    if(!answer(answerId)||mapGeneration.get(answerId)?.status==='processing')return;
+    if(!window.ZhihuDemoCommunity?.isAuthenticated?.()){window.ZhihuDemoCommunity?.requireAccount?.();return;}
+    trace('map_generate_retried',{answerId});
+    void runMapGeneration(answerId);
+  }
+  function startWorkbench(){
     if(!selection.size)return;
     selectedQuestion=qById(document.body.dataset.questionId)||selectedQuestion||questions[0];
     const previous=wb?.questionId===selectedQuestion.id?wb:workspace(selectedQuestion.id);
-    const ids=[...selection];
-    const missing=ids.filter(id=>!maps[id]);
+    const incoming=[...selection];
+    let next;
+    try{next=core.mergeAnswers(previous,incoming,MAX_FLOATING_ANSWERS);}catch(error){toast(error.message);return;}
+    const missing=incoming.filter(id=>!maps[id]&&mapGeneration.get(id)?.status!=='processing');
     if(missing.length){
       if(!window.ZhihuDemoCommunity?.isAuthenticated?.()){ window.ZhihuDemoCommunity?.requireAccount?.(); return; }
-      toast(`正在生成 ${missing.length} 篇回答的节点结构图…`);
-      try{
-        const generated=await Promise.all(missing.map(generateMap));
-        generated.forEach(result=>{maps[result.answerId]=result.map;});
-      }catch(error){toast(error.message);return;}
     }
-    const slots=previous.slots.map(id=>ids.includes(id)?id:null);
-    const ready=ids.filter(id=>maps[id]);
-    for(let i=0;i<2;i++)if(!slots[i])slots[i]=ready.find(id=>!slots.includes(id))||null;
-    wb={...previous,questionId:selectedQuestion.id,selected:ids,slots,reader:ids.includes(previous.reader)?previous.reader:ids[0]};pair=[];
+    wb={...next,questionId:selectedQuestion.id};pair=[];
+    trace('workbench_opened',{answerIds:wb.selected,addedAnswerIds:incoming,selectedCount:wb.selected.length,visibleAnswerIds:wb.slots.filter(Boolean)});
+    missing.forEach(id=>mapGeneration.set(id,{status:'processing',error:''}));
     selectMode=false;
+    selection=new Set();
+    selectedQuestion=null;
     if(dialog.open)closeModal(true);
     saveWorkspace();decorate();renderWorkbench();
-    toast(ready.length?'节点已在右侧浮窗打开。蓝色“观点”节点可跨回答碰撞。':'所选回答暂无可用结构图。');
+    if(missing.length){
+      toast(`浮窗已打开，正在生成 ${missing.length} 篇回答的结构图。可以先最小化浮窗。`);
+      missing.forEach(id=>void runMapGeneration(id));
+    }else toast('文章观点树已打开。树的末层蓝色节点可以跨回答碰撞。');
   }
 
   /* ---------- P05：原页上的右侧节点浮窗 ---------- */
-  function nodeCard(aid,n,position='',groupTitle=''){
-    const ref={answerId:aid,nodeId:n.id},selected=pair.some(r=>core.keyOf(r)===core.keyOf(ref));
-    return `<article class="co-node ${n.role==='thesis'?'thesis':''} ${selected?'selected':''}" style="${position}" draggable="${n.type==='claim'}" data-node="${esc(n.id)}" data-aid="${aid}"><button class="co-node-main" data-co="pair-node" data-aid="${aid}" data-nid="${esc(n.id)}" aria-pressed="${selected}" title="${n.type==='claim'?'点击选择，再点击另一篇回答的观点':'查看节点与原文'}">${esc(n.text)}</button><div class="co-node-meta">${badge(n.role==='thesis'?'总观点':types[n.type]||n.type,n.type==='claim'?'':'gray')}${groupTitle&&n.role!=='thesis'?`<span class="co-node-group">${esc(cut(groupTitle,10))}</span>`:''}<button class="co-link" data-co="node-source" data-aid="${aid}" data-nid="${esc(n.id)}">原文 ↗</button></div></article>`;
+  function treeGraphHtml(aid,m){
+    const cardW=176,cardH=64,gapX=58,gapY=22,padX=28,padY=30;
+    const placed=[],edges=[];
+    let leafIndex=0,maxDepth=0;
+    function place(item,depth=0){
+      maxDepth=Math.max(maxDepth,depth);
+      const children=(item.children||[]).map(child=>place(child,depth+1));
+      const y=children.length?(children[0].y+children[children.length-1].y)/2:padY+(leafIndex++)*(cardH+gapY);
+      const entry={item,depth,x:padX+depth*(cardW+gapX),y};
+      placed.push(entry);
+      for(const child of children)edges.push({from:entry,to:child});
+      return entry;
+    }
+    place(m.tree);
+    const canvasW=padX*2+(maxDepth+1)*cardW+maxDepth*gapX;
+    const canvasH=Math.max(220,padY*2+Math.max(1,leafIndex)*cardH+Math.max(0,leafIndex-1)*gapY);
+    const paths=edges.map(({from,to})=>{
+      const sx=from.x+cardW,sy=from.y+cardH/2,ex=to.x,ey=to.y+cardH/2,mx=(sx+ex)/2;
+      return `<path d="M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ey}, ${ex} ${ey}"/>`;
+    }).join('');
+    const cards=placed.map(({item,x,y})=>{
+      const full=item.kind==='collision'?(node({answerId:aid,nodeId:item.id})||item):item;
+      const collidable=item.kind==='collision';
+      const selected=collidable&&pair.some(ref=>core.keyOf(ref)===core.keyOf({answerId:aid,nodeId:item.id}));
+      /* 统一圆角卡片：所有卡片都可查看详情和定位原文；只有蓝色末层卡可拖起碰撞。
+         拖拽改由 pointer 事件接管，不再用 HTML5 draggable（默认拖影会破坏卡牌质感）。 */
+      const kindName=item.kind==='root'?'总观点':item.kind==='branch'?'结构分支':'可碰撞观点';
+      const text=nodeDisplayText(full||item);
+      const hint=collidable?'单击查看详情，双击定位原文；拖起卡牌可与另一篇回答碰撞':'单击查看详情，双击定位原文';
+      return `<article class="co-node co-graph-node is-${esc(item.kind)} ${collidable?'is-collision':''} ${selected?'selected':''}" style="left:${x}px;top:${y}px" data-node="${esc(item.id)}" data-aid="${aid}" data-collidable="${collidable}" aria-label="${esc(kindName)}：${esc(cut(text,40))}"><button class="co-node-main" data-co="node-detail" data-aid="${aid}" data-nid="${esc(item.id)}" aria-pressed="${selected}" title="${hint}">${esc(text)}</button></article>`;
+    }).join('');
+    return `<div class="co-network co-tree-network" data-map-aid="${aid}" style="--canvas-w:${canvasW}px;--canvas-h:${canvasH}px;--node-w:${cardW}px;--node-h:${cardH}px"><svg class="co-network-lines" viewBox="0 0 ${canvasW} ${canvasH}" aria-hidden="true">${paths}</svg>${cards}</div>`;
   }
   function networkHtml(aid,m){
-    const thesis=m.nodes.find(n=>n.role==='thesis')||m.nodes[0];
-    const satellites=m.nodes.filter(n=>n!==thesis);
-    const cardW=124,cardH=76,canvasW=300,centerX=(canvasW-cardW)/2,centerY=22;
-    const rows=Math.max(Math.ceil(satellites.length/2),1),canvasH=Math.max(330,142+rows*94);
-    const points=satellites.map((n,i)=>{const left=i%2===0,row=Math.floor(i/2),jitter=((row%3)-1)*4;return {n,x:left?5+jitter:canvasW-cardW-5-jitter,y:138+row*94};});
-    const groupOf=n=>m.groups.find(g=>g.id===n.groupId)?.title||'';
-    const startX=centerX+cardW/2,startY=centerY+cardH;
-    const paths=points.map(({x,y})=>{const endX=x+cardW/2,endY=y,bendY=Math.max(startY+26,(startY+endY)/2);return `<path d="M ${startX} ${startY} C ${startX} ${bendY}, ${endX} ${bendY-18}, ${endX} ${endY}"/>`;}).join('');
-    return `<div class="co-network" data-map-aid="${aid}" style="--canvas-w:${canvasW}px;--canvas-h:${canvasH}px;--node-w:${cardW}px;--node-h:${cardH}px"><svg class="co-network-lines" viewBox="0 0 ${canvasW} ${canvasH}" aria-hidden="true">${paths}</svg>${nodeCard(aid,thesis,`left:${centerX}px;top:${centerY}px`)}${points.map(({n,x,y})=>nodeCard(aid,n,`left:${x}px;top:${y}px`,groupOf(n))).join('')}</div>`;
+    if(m?.tree)return treeGraphHtml(aid,m);
+    return `<div class="co-generation-state is-failed" role="alert">${icon('alert')}<strong>结构数据不兼容</strong><p>这份结果不是新版观点树，请重新生成。</p>${btn('重新生成','retry-map','primary','data-aid="'+esc(aid)+'"')}</div>`;
   }
   async function loadPublicDiscoveries(){
     const qid=document.body.dataset.questionId||'';
@@ -321,17 +407,35 @@
     }catch{/* 公共列表短暂不可用时仍允许阅读已加载页面 */}
   }
   function applyMapView(aid){
-    const net=root.querySelector(`.co-network[data-map-aid="${CSS.escape(aid)}"]`),view=mapViews.get(aid)||{x:0,y:0,zoom:1};
+    const net=root.querySelector(`.co-network[data-map-aid="${CSS.escape(aid)}"]`);
     if(!net)return;
+    let view=mapViews.get(aid);
+    if(!view&&net.classList.contains('co-tree-network')){
+      const viewport=net.closest('.co-map-scroll');
+      const canvasW=parseFloat(net.style.getPropertyValue('--canvas-w'))||net.offsetWidth;
+      const canvasH=parseFloat(net.style.getPropertyValue('--canvas-h'))||net.offsetHeight;
+      const fitX=Math.max(0.1,(viewport.clientWidth-24)/canvasW);
+      const fitY=Math.max(0.1,(viewport.clientHeight-44)/canvasH);
+      const zoom=Math.min(1,Math.max(.48,Math.min(fitX,fitY)));
+      view={x:12,y:Math.max(12,(viewport.clientHeight-canvasH*zoom)/2),zoom};
+      mapViews.set(aid,view);
+    }
+    view=view||{x:0,y:0,zoom:1};
     net.style.setProperty('--pan-x',`${view.x}px`);
     net.style.setProperty('--pan-y',`${view.y}px`);
     net.style.setProperty('--map-zoom',view.zoom);
   }
   function mapSlot(aid,index){
-    const m=maps[aid],a=answer(aid),slotName=index?'下方':'上方',thesis=m?.nodes.find(n=>n.role==='thesis')||m?.nodes[0];
-    return `<section class="co-map co-float-window" aria-label="${slotName}回答节点浮窗" data-slot-index="${index}" data-aid="${aid}"><header class="co-map-head"><span class="co-slot-letter">${esc([...a.author][0])}</span><button class="co-float-identity" data-co="reader" data-aid="${aid}" title="点击跳到这篇回答开头"><span>${esc(a.author)}</span><strong>${thesis?esc(thesis.text):'暂未生成结构图'}</strong></button><button class="co-iconbtn co-minimize-slot" data-co="close-slot" data-slot="${index}" aria-label="最小化为作者圆球" title="最小化">−</button><button class="co-iconbtn co-close-answer" data-co="remove-answer" data-aid="${aid}" aria-label="关闭${esc(a.author)}的回答浮窗" title="关闭浮窗">×</button></header><div class="co-map-scroll">${
-      !m?`<div class="co-empty">${icon('book')}<strong>这篇回答暂不支持拆解</strong>没有已保存的抽取结果。可在中间阅读原文，或切换其他回答。<br>本版不会把原文分段伪装成 AI 抽取结果。</div>`
-      :`<div class="co-map-note">左键拖动画布 · 滚轮缩放 · 点击节点选取</div>${networkHtml(aid,m)}`}</div></section>`;
+    const m=maps[aid],a=answer(aid),task=mapGeneration.get(aid),slotName=index?'下方':'上方',thesis=m?.tree||m?.nodes.find(n=>n.role==='thesis')||m?.nodes[0];
+    const title=task?.status==='processing'?'正在生成结构图…':task?.status==='failed'?'结构图生成失败':thesis?nodeDisplayText(thesis):'等待生成结构图';
+    const content=m
+      ?`<div class="co-map-note">单击节点看详情 · 双击定位原文 · 蓝色卡牌可拖起碰撞</div>${networkHtml(aid,m)}`
+      :task?.status==='failed'
+        ?`<div class="co-generation-state is-failed" role="alert">${icon('alert')}<strong>生成失败</strong><p>${esc(task.error||'结构图生成失败，请稍后重试。')}</p>${btn('重新生成','retry-map','primary','data-aid="'+esc(aid)+'"')}</div>`
+        :task?.status==='processing'
+          ?`<div class="co-generation-state" role="status" aria-live="polite"><span class="co-spinner" aria-hidden="true"></span><strong>正在生成结构图</strong><p>可以最小化浮窗，生成会在后台继续。</p></div>`
+          :`<div class="co-generation-state is-idle">${icon('nodes')}<strong>尚未生成结构图</strong><p>点击生成后，结果会显示在这个浮窗中。</p>${btn('点击生成','retry-map','primary','data-aid="'+esc(aid)+'"')}</div>`;
+    return `<section class="co-map co-float-window${task?.status==='processing'?' is-generating':''}" aria-label="${slotName}回答节点浮窗" data-slot-index="${index}" data-aid="${aid}"><header class="co-map-head"><span class="co-slot-letter">${esc([...a.author][0])}</span><button class="co-float-identity" data-co="reader" data-aid="${aid}" title="点击跳到这篇回答开头"><span>${esc(a.author)}</span><strong>${esc(title)}</strong></button><button class="co-iconbtn co-minimize-slot" data-co="close-slot" data-slot="${index}" aria-label="最小化为作者圆球" title="最小化">−</button><button class="co-iconbtn co-close-answer" data-co="remove-answer" data-aid="${aid}" aria-label="关闭${esc(a.author)}的回答浮窗" title="关闭浮窗">×</button></header><div class="co-map-scroll${m?.tree?' is-tree':''}">${content}</div></section>`;
   }
   function shelfHtml(){
     const mine=myItems(wb.questionId);
@@ -349,21 +453,34 @@
     const mapScroll=[...(old?.querySelectorAll('.co-map-scroll')||[])].map(e=>e.scrollTop);
     old?.remove(); root.querySelector('.co-pickbar')?.remove();
     const openIds=wb.slots.filter(Boolean),collapsed=wb.selected.filter(id=>!openIds.includes(id));
-    root.insertAdjacentHTML('beforeend',`<section class="co-floating-stack ${openIds.length?'':'is-all-collapsed'}" aria-label="回答节点浮窗">${openIds.length?`<div class="co-float-windows">${wb.slots.map((id,index)=>id?mapSlot(id,index):'').join('')}</div><div class="co-pair-bar" id="co-pair-bar">${pairBar()}</div>`:''}<div class="co-collapsed" aria-label="已最小化的回答">${collapsed.map(id=>`<button class="co-miniball" type="button" draggable="true" data-co="open-slot" data-aid="${id}" title="${esc(answer(id).author)}：左键恢复或拖动替换，右键可删除窗口">${esc([...answer(id).author][0])}</button>`).join('')}</div></section>`);
+    root.insertAdjacentHTML('beforeend',`<section class="co-floating-stack ${openIds.length?'':'is-all-collapsed'}" aria-label="回答节点浮窗">${openIds.length?`<div class="co-float-windows">${wb.slots.map((id,index)=>id?mapSlot(id,index):'').join('')}</div><div class="co-pair-bar" id="co-pair-bar">${pairBar()}</div>`:''}<div class="co-collapsed" aria-label="已最小化的回答">${collapsed.map(id=>{const status=mapGeneration.get(id)?.status||'';const statusText=status==='processing'?'（结构图生成中）':status==='failed'?'（结构图生成失败）':'';return `<button class="co-miniball${status?' is-'+status:''}" type="button" draggable="true" data-co="open-slot" data-aid="${id}" title="${esc(answer(id).author)}${statusText}：左键恢复或拖动替换，右键可删除窗口">${esc([...answer(id).author][0])}</button>`;}).join('')}</div></section>`);
     root.querySelectorAll('.co-map-scroll').forEach((e,i)=>e.scrollTop=mapScroll[i]||0);
     openIds.forEach(applyMapView);
     renderSelectFab();
   }
   function pairBar(){
-    if(!pair.length)return `${icon('spark')}<span>将一个观点拖到另一篇回答的观点上<br>也可以依次点击两个节点；按 Esc 取消</span>`;
-    return `${icon('spark')}<span>已选：${esc(cut(node(pair[0])?.text,28))}<br>再选另一篇回答的观点，开始碰撞</span><button class="co-link" data-co="clear-pair">取消</button>`;
+    const tasks=wb?.selected.map(id=>mapGeneration.get(id)).filter(Boolean)||[];
+    const processing=tasks.filter(task=>task.status==='processing').length;
+    if(processing)return `<span class="co-spinner" aria-hidden="true"></span><span>${processing} 篇回答的结构图正在生成<br>可继续阅读或最小化浮窗</span>`;
+    const failed=tasks.filter(task=>task.status==='failed').length;
+    if(failed)return `${icon('alert')}<span>${failed} 篇回答生成失败<br>请在对应浮窗中查看并重试</span>`;
+    if(!pair.length)return `${icon('spark')}<span>拖起一张蓝色卡牌，靠到另一篇回答的蓝色卡牌上<br>单击查看详情，双击定位原文</span>`;
+    return `${icon('spark')}<span>已选：${esc(cut(nodeText(node(pair[0])),28))}<br>再选另一篇回答的观点，开始碰撞</span><button class="co-link" data-co="clear-pair">取消</button>`;
   }
   function updatePair(){
     root.querySelectorAll('.co-node').forEach(el=>{const yes=pair.some(r=>r.answerId===el.dataset.aid&&r.nodeId===el.dataset.node);el.classList.toggle('selected',yes);el.querySelector('.co-node-main').setAttribute('aria-pressed',String(yes));});
     const bar=root.querySelector('#co-pair-bar');if(bar)bar.innerHTML=pairBar();
   }
+  function nodeKindName(value){return value?.kind==='root'?'总观点':value?.kind==='branch'?'结构分支':'观点';}
+  function rejectNonCollidable(ref,gesture){
+    const target=node(ref);
+    const name=nodeKindName(target);
+    toast(gesture==='drag'
+      ?`${name}是白色结构卡，不能参与碰撞。请拖动蓝色的观点卡牌。`
+      :`${name}是白色结构卡，不参与碰撞，已为你定位到对应原文。可碰撞的是蓝色观点卡牌。`);
+  }
   function pick(ref){
-    if(node(ref)?.type!=='claim'){showNodeSource(ref);return;}
+    if(!isCollidable(node(ref))){rejectNonCollidable(ref,'click');locate(ref);return;}
     if(pair.some(r=>core.keyOf(r)===core.keyOf(ref))){pair=[];updatePair();return;}
     if(!pair.length){pair=[ref];updatePair();return;}
     const error=core.validatePair(wb.questionId,[pair[0],ref],node);
@@ -374,16 +491,43 @@
   /* ---------- 来源卡片与证据校验 ---------- */
   function sourceCards(refs,evidence){
     return `<div class="co-source-grid">${refs.map((r,i)=>{
-      const n=node(r),a=answer(r.answerId),hit=evidence?.details?.[i];
-      const quoteHtml=n.quote?`<blockquote>${esc(n.quote)}</blockquote>`:'<blockquote class="co-noquote">这条是 AI 全文归纳，没有直接引用原句。请查看全文核对。</blockquote>';
-      const mark=!hit?'':hit.found?badge(hit.method==='exact'?'原文可定位':'原文可定位（归一化匹配）','green'):badge(n.quote?'未能在原文中找到该引用':'无原文引用','amber');
-      return `<section class="co-source">${badge(i?'来源 B':'来源 A')} <strong>${esc(a.author)}</strong> ${mark}<p>${esc(n.text)}</p>${quoteHtml}<div class="co-muted">适用条件：${n.scope?esc(n.scope):'原文未明确标注范围'}</div><div class="co-row" style="margin-top:8px">${n.quote?`<button class="co-link" data-co="locate" data-aid="${r.answerId}" data-nid="${esc(r.nodeId)}">定位原文 ↗</button>`:''}<button class="co-link" data-co="read-answer" data-aid="${r.answerId}">查看全文 ↗</button></div></section>`;
+      const n=node(r),a=answer(r.answerId),hit=evidence?.details?.[i],quote=nodeQuote(n);
+      const quoteHtml=quote?`<blockquote>${esc(quote)}</blockquote>`:'<blockquote class="co-noquote">这条是全文归纳，没有单一对应原句，请查看它的下级观点。</blockquote>';
+      const mark=!hit?'':hit.found?badge(hit.method==='exact'?'原文可定位':'原文可定位（归一化匹配）','green'):badge(quote?'未能在原文中找到该引用':'无单一原文引用','amber');
+      const scopes=conditionText(n);
+      const supports=(n.supports||[]).length?`<details class="co-support-details"><summary>查看全部支撑材料（${n.supports.length}）</summary>${n.supports.map(item=>`<div><b>${esc(item.summary||'原文依据')}</b><blockquote>${esc(item.quote)}</blockquote><button class="co-link" data-co="locate-quote" data-aid="${r.answerId}" data-quote="${esc(item.quote)}">定位这段原文 ↗</button></div>`).join('')}</details>`:'';
+      return `<section class="co-source">${badge(i?'来源 B':'来源 A')} <strong>${esc(a.author)}</strong> ${mark}<p>${esc(nodeText(n))}</p>${n.reasonSummary?`<div class="co-muted">论证摘要：${esc(n.reasonSummary)}</div>`:''}${quoteHtml}<div class="co-muted">适用条件：${scopes?esc(scopes):'原文未明确标注范围'}</div>${supports}<div class="co-row" style="margin-top:8px">${quote?`<button class="co-link" data-co="locate" data-aid="${r.answerId}" data-nid="${esc(r.nodeId)}">定位主要原文 ↗</button>`:''}<button class="co-link" data-co="read-answer" data-aid="${r.answerId}">查看全文 ↗</button></div></section>`;
     }).join('')}</div>`;
   }
   function showNodeSource(ref){
     const n=node(ref);
     sourceReturn=modalKind==='detail'?sourceReturn:null;
-    openModal('核对节点来源','摘要是抽取结果的转述；原文引用也不等于该观点已获证实。',sourceCards([ref],core.evidenceCheck([ref],node,paragraphsOf))+`<div class="co-note-box">节点类型：${esc(types[n.type]||n.type)}。${n.type==='claim'?'可与另一篇回答的观点节点碰撞。':'本版暂不支持此类型参与碰撞，可继续阅读与比较。'}</div>`,btn('返回节点浮窗','close-modal'),false,'source');
+    const path=(n.ancestorPath||[]).map(item=>item.text).filter(Boolean).join(' › ');
+    openModal('核对观点依据','观点摘要用于帮助理解；支撑材料仍需回到原文语境中核对。',sourceCards([ref],core.evidenceCheck([ref],node,paragraphsOf))+`${path?`<div class="co-note-box"><strong>所在结构</strong><br>${esc(path)}</div>`:''}<div class="co-note-box">这是观点树最末层的可碰撞节点。它下面的原文、案例和条件不会继续显示成独立节点。</div>`,btn('返回观点树','close-modal'),false,'source');
+  }
+
+  function showTreeNodeDetail(ref){
+    const n=node(ref),a=answer(ref.answerId);
+    if(!n||!a)return;
+    const kind=nodeKindName(n),display=nodeDisplayText(n),full=nodeText(n)||n.summary||n.title||display;
+    /* root / branch 只是结构导航，详情只给原文依据。collision 才需要观点解释。
+       旧缓存没有 explanation 时不重新调模型，用已有的完整观点、论证摘要和
+       适用条件组合成兼容解释，保证老数据也不留空白。 */
+    const generatedExplanation=String(n.explanation||'').trim();
+    const legacyExplanation=[
+      full?`这个观点的核心意思是：${String(full).replace(/[。！？]+$/,'')}。`:'',
+      n.reasonSummary?`它的主要理由是：${String(n.reasonSummary).replace(/[。！？]+$/,'')}。`:'',
+      conditionText(n)?`它的适用范围是：${conditionText(n)}。`:''
+    ].filter(Boolean).join('');
+    const explanation=generatedExplanation||legacyExplanation;
+    const statementBlock=isCollidable(n)&&explanation
+      ?`<section class="co-node-detail-statement is-explanation"><h3>观点解释</h3>${explanation.split(/\n\s*\n/).filter(Boolean).slice(0,2).map(p=>`<p>${esc(p)}</p>`).join('')}</section>`
+      :'';
+    const supports=(Array.isArray(n.supports)&&n.supports.length?n.supports:(n.sourceAnchors||[]).map(anchor=>({summary:'原文依据',quote:anchor.quote})))
+      .filter(item=>item?.quote).slice(0,4);
+    const supportHtml=supports.length?`<section class="co-node-detail-evidence"><h3>原文依据</h3>${supports.map((item,index)=>`<blockquote><span class="co-node-detail-evidence-index">${index+1}</span><p>${esc(item.quote)}</p><button class="co-link" data-co="locate-quote" data-aid="${ref.answerId}" data-quote="${esc(item.quote)}">定位这段原文 ↗</button></blockquote>`).join('')}</section>`:`<div class="co-note-box">这是对全文的归纳，当前没有可单独列出的原文摘录。可以通过下方按钮回到回答对应位置。</div>`;
+    trace('node_detail_opened',{answerId:ref.answerId,nodeId:ref.nodeId});
+    openModal(display,`${a.author} · ${kind}`,`${statementBlock}${supportHtml}`,`<span class="co-muted">双击结构图节点也可直接定位</span><div class="co-row">${btn('关闭','close-modal')}${btn('定位网页原文','locate','primary',`data-aid="${ref.answerId}" data-nid="${esc(ref.nodeId)}"`)}</div>`,false,'node-detail');
   }
 
   /* ---------- P06：碰撞确认（动作已内化，用户不选动作） ---------- */
@@ -399,32 +543,51 @@
     state.jobs=state.jobs.slice(0,50);
   }
   function generate(){
+    const rect=dialog.getBoundingClientRect();
+    const origin=rect.width?{x:rect.left+rect.width/2,y:rect.top+rect.height/2}:null;
+    closeModal(true);
+    startCollision(origin);
+  }
+  /* 统一的碰撞入口：拖拽合成与弹窗确认都走这里。
+     origin 是合成发生的屏幕坐标，用于让新卡牌从碰撞点飞向左侧产物栏。 */
+  function startCollision(origin){
     const error=core.validatePair(wb.questionId,collisionRefs,node);
     if(error){toast(error);return;}
     const key=core.pairKey(wb.questionId,collisionRefs,collisionAction);
     const existing=state.items.find(i=>i.pairKey===key&&!['discarded','withdrawn'].includes(i.status));
     if(existing){
-      toast('这组节点已经有一条发现，已打开原记录。');
-      showDetail(existing.id);return;
+      const known=results.find(r=>r.itemId===existing.id);
+      if(known){toast('这组节点已经有一张卡牌，可在左侧点开。');pair=[];updatePair();return;}
+      const id=addResult(collisionRefs,existing.newQuestion||existing.title);
+      const entry=resultById(id);
+      entry.status='ready';entry.itemId=existing.id;entry.title=existing.newQuestion||existing.title;
+      renderResultRail();peekRail();flyToRail(id,origin);
+      toast('这组节点已经有一条发现，卡牌已放到左侧。');
+      pair=[];updatePair();return;
     }
     const published=allItems().find(i=>i.pairKey===key&&i.status==='published');
     if(published){showDuplicate(published);return;}
-    runRealCollide(key);
+    const resultId=addResult(collisionRefs,'');
+    flyToRail(resultId,origin);
+    pair=[];updatePair();
+    void runRealCollide(key,resultId);
   }
 
   /* ---------- 真实碰撞：调用后端 AI 链路 ---------- */
   // 产物为两段式（关系说明 + 新问题），动作完全内化：
   // 用户只负责选哪两个节点，关系类型由模型判定后呈现，不作为选项要求用户输入。
-  async function runRealCollide(key){
+  // 碰撞结果不再用「思考中」弹窗打断阅读，而是先在页面左侧落一张加载中的新卡牌，
+  // 生成完成后原地变成「已经生成好」，判定不可碰撞则整张卡置灰并给出删除入口。
+  async function runRealCollide(key,resultId){
     const refs=collisionRefs.map(r=>({...r}));
-    showThinking();
+    const result=resultById(resultId);
     let data;
     try{
       const resp=await fetch('/api/collide',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({questionId:wb.questionId,questionTitle:qById(wb.questionId)?.title||'',
           refs:refs.map(r=>({answerId:r.answerId,nodeId:r.nodeId}))})});
       data=await resp.json();
-      if(resp.status===401){window.ZhihuDemoCommunity?.requireAccount?.();return;}
+      if(resp.status===401){window.ZhihuDemoCommunity?.requireAccount?.();failResult(resultId,'需要先登录本站才能碰撞。');return;}
     }catch(err){
       data={status:'blocked',reason:'无法连接碰撞服务。请确认「启动碰撞服务.cmd」正在运行。'};
     }
@@ -432,18 +595,18 @@
 
     if(data.status==='no_result'){
       recordJob('collide',{status:'succeeded',outcome:'no_result',reason:data.reason||'',refs,action:collisionAction});
-      persist();showAiNoResult(data);return;
+      persist();failResult(resultId,data.reason||'这两个观点讨论的不是同一件事，无法碰撞。','no_result');return;
     }
     if(data.status!=='published'){
       recordJob('collide',{status:'succeeded',outcome:'blocked',reason:data.reason||'',refs,action:collisionAction});
-      persist();showBlocked(data);return;
+      persist();failResult(resultId,data.reason||'产物未通过引用回查，已整条丢弃。','blocked');return;
     }
 
     // 通过 AI 复审（evidence 回查 + 具体元素扫描）→ 默认发布进入公共视野
     const item={id:uid('ins'),questionId:wb.questionId,refs,action:collisionAction,pairKey:key,
       answerPairKey:`${wb.questionId}|${refs.map(r=>r.answerId).sort().join('|')}`,
       relationType:data.relation_type,relationText:data.relation_text,
-      newQuestion:data.question,whoCanAnswer:data.who_can_answer,
+      newQuestion:data.question,questionDetail:data.question_detail,whoCanAnswer:data.who_can_answer,
       aiEvidence:data.evidence_located||[],
       title:data.question,rationale:data.relation_text,
       limitations:'由 AI 基于两篇回答的原文推导，已通过引用回查校验；不代表来源作者认可。',
@@ -458,37 +621,21 @@
     try{
       const publish=await fetch('/api/discoveries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(item)});
       const saved=await publish.json();
-      if(publish.status===401){window.ZhihuDemoCommunity?.requireAccount?.();return;}
+      if(publish.status===401){window.ZhihuDemoCommunity?.requireAccount?.();failResult(resultId,'需要先登录本站才能保存结果。');return;}
       if(!publish.ok)throw new Error(saved.error||'公开保存失败。');
       Object.assign(item,saved.item||{});
-    }catch(error){showBlocked({reason:`AI 已生成结果，但保存到公共列表失败：${error.message}`});return;}
+    }catch(error){failResult(resultId,`AI 已生成结果，但保存到公共列表失败：${error.message}`,'blocked');return;}
     state.items.unshift(item);
     state.jobs.unshift({id:jobId,kind:'collide',status:'succeeded',outcome:'published',createdAt:now,refs,action:collisionAction,resultRef:item.id});
-    persist();pair=[];shelfTab='published';renderWorkbench();decorate();showDetail(item.id);
+    persist();pair=[];shelfTab='published';renderWorkbench();decorate();
+    if(result){result.status='ready';result.itemId=item.id;result.title=item.newQuestion||item.title;result.reason='';result.isNew=true;}
+    renderResultRail();peekRail(3600);
+    toast('新节点已经生成好，点击左侧卡牌即可查看。');
   }
 
-  function showThinking(){
-    openModal('正在碰撞','AI 正在读两处原文，判断它们的关系并提出新问题。',
-      demoNote+sourceCards(collisionRefs,core.evidenceCheck(collisionRefs,node,paragraphsOf))
-      +`<div class="co-empty">${icon('spark')}<strong>调用中，请稍候…</strong>免费额度下单次约 10–30 秒。产出会经过引用回查，引用对不上会被整条丢弃。</div>`,
-      '',false,'thinking');
-  }
-
-  function showAiNoResult(data){
-    openModal('这两个节点碰不出新问题','AI 判定它们讨论的不是同一件事，这是合法结果，不是失败。',
-      demoNote+`<div class="co-empty">${icon('alert')}<strong>${esc(data.reason||'两个观点讨论的对象差距过大。')}</strong>没有创建任何公开节点。换一个节点再试。</div>`
-      +sourceCards(collisionRefs,core.evidenceCheck(collisionRefs,node,paragraphsOf)),
-      `${btn('重新选择节点','close-modal','primary')}`,false,'no-result');
-  }
-
-  function showBlocked(data){
-    openModal('产物未通过复审','AI 生成了内容，但它没有通过引用回查，因此不予发布。',
-      demoNote+`<div class="co-warn-box">${icon('alert')}${esc(data.reason||'未通过校验。')}</div>`
-      +`<div class="co-note-box">这正是设计中的出口闸门：问题里的每个具体元素都必须能在原文找到出处，对不上就整条丢弃，宁可无结果也不放幻觉进公共区。</div>`
-      +(data.relation_text?`<p class="co-detail-rationale">AI 判断的关系：${esc(data.relation_text)}</p>`:'')
-      +sourceCards(collisionRefs,core.evidenceCheck(collisionRefs,node,paragraphsOf)),
-      `${btn('重新选择节点','close-modal','primary')}`,false,'blocked');
-  }
+  /* 碰撞过程已改由左侧卡牌承载（加载中 / 已生成好 / 失败置灰），
+     原来的「思考中」「无结果」「未通过复审」三个打断式弹窗不再使用。
+     失败原因通过卡牌文案与 toast 呈现，用户可用卡牌上的垃圾桶删除。 */
 
   function showNoResult(verdict){
     openModal('这一次没有得到可靠的新判断','任务已完成，但结果是“无有效碰撞”，不会生成任何发现。',demoNote+`<div class="co-empty">${icon('alert')}<strong>${esc(verdict.message)}</strong>本版按本地规则判断，不调用模型，也不会因此创建空的公开节点。</div>${sourceCards(collisionRefs,core.evidenceCheck(collisionRefs,node,paragraphsOf))}<div class="co-note-box">对应设计：<code>job.status=succeeded</code>、<code>outcome=no_result</code>、<code>reason=${esc(verdict.code)}</code>；节点配对已保留，可换动作或换节点重试。</div>`,`${btn('换一个动作','back-to-action')}${btn('重新选择节点','close-modal','primary')}`,false,'no-result');
@@ -582,6 +729,21 @@
   function statusPlaceholder(i){
     return `<div class="co-empty">${icon('alert')}<strong>该发现暂不可见</strong>这条发现已${i.status==='withdrawn'?'被发起者撤回':'被演示审核员下架'}。按设计，正文、摘录和评论不再展示，后台记录保留。</div>${btn('返回问题','close-modal','primary')}`;
   }
+  function collisionAnalysisHtml(value){
+    const paragraphs=String(value||'AI 从两篇回答的判断中找到了值得继续追问的差异。').trim().split(/\n\s*\n/).filter(Boolean).slice(0,2);
+    return paragraphs.map(text=>`<p>${esc(text)}</p>`).join('');
+  }
+  /* 问题详情说明：讲清这个问题落在谁身上、为什么两篇回答都答不了它。
+     旧数据没有 questionDetail 时用 whoCanAnswer 做本地兼容，不为补历史数据额外消耗模型额度。 */
+  function questionDetailHtml(item,className){
+    const saved=String(item?.questionDetail||'').trim();
+    const audience=String(item?.whoCanAnswer||'').trim();
+    const text=saved||(audience
+      ?`这个问题具体落在${audience}身上。两篇原回答提供了相关判断，但没有直接说明在这种处境中该如何区分或取舍；回答它需要进一步讲清适用条件、判断标准和可能代价。`
+      :'两篇原回答提供了相关判断，但还没有直接说明这些判断在同一现实处境中该如何区分或取舍。回答它需要补充具体适用条件、判断标准和可能代价。');
+    const paragraphs=text.split(/\n\s*\n/).filter(Boolean).slice(0,2);
+    return `<div class="${className}">${paragraphs.map(p=>`<p>${esc(p)}</p>`).join('')}</div>`;
+  }
   function showDetail(id){
     const i=itemById(id);
     if(!i)return toast('本浏览器没有这条发现。');
@@ -589,11 +751,13 @@
     if(['withdrawn','hidden','discarded'].includes(i.status))return openModal('该发现暂不可见','状态占位 · 内容不再公开展示',statusPlaceholder(i),'',false,'placeholder');
     sourceReturn=id;
     const comments=visibleComments(id), hidden=allComments(id).length-comments.length;
-    const evidence=i.evidence||core.evidenceCheck(i.refs,node,paragraphsOf);
-    const mine=i.creatorId===me().id;
-    openModal(i.status==='pending'?'待审核的发现':'回答之间的新问题',esc(qById(i.questionId).title),
-      `${demoNote}<div class="co-detail-meta">${badge(names[i.status],i.status==='pending'?'amber':i.status==='published'?'green':'')}${badge(tagOf(i),'gray')}<span>由 ${esc(i.author)} 提出</span>${i.publishedAt?`<span>首次公开 ${when(i.publishedAt)}</span>`:''}${i.reviewer?`<span>${i.reviewMode==='ai_review'?'AI 复审已通过':i.reviewMode==='demo_self_review'?'演示自审':'演示审核'} · ${esc(i.reviewer)}</span>`:''}</div>${i.relationText&&i.newQuestion?`<div class="co-note-box" style="margin-top:14px"><strong>关系说明</strong><p style="margin:6px 0 0;white-space:pre-wrap">${esc(i.relationText)}</p></div><h3 class="co-detail-title" style="margin-top:18px">${esc(i.newQuestion)}</h3>${i.whoCanAnswer?`<p class="co-muted">适合回答的人：${esc(i.whoCanAnswer)}</p>`:''}`:`<h3 class="co-detail-title">${esc(i.title)}</h3><p class="co-detail-rationale" style="white-space:pre-wrap">${esc(i.rationale)}</p>`}${(i.aiEvidence&&i.aiEvidence.length)?`<div class="co-note-box" style="margin-top:14px"><strong>AI 引用的原文凭据（已逐条回查）</strong><ol style="margin:8px 0 0;padding-left:20px">${i.aiEvidence.map(e=>`<li><span class="co-muted">${esc(e.answer_id)}@${e.start} · ${esc(e.method)}</span><br>「${esc(e.text)}」</li>`).join('')}</ol></div>`:''}<p class="co-detail-limits">局限：${esc(i.limitations||'提交者未填写额外局限。')}<br>基于两篇回答的推导，不代表来源作者认可。</p><h3 style="font-size:15px;margin-top:24px">从这两个回答出发</h3>${sourceCards(i.refs,evidence)}<hr class="co-divider"><div class="co-between"><strong>围绕这个问题讨论 · ${comments.length}</strong><span class="co-muted">两个回答入口共用同一讨论区</span></div><ol class="co-comment-list">${comments.map(c=>`<li><span class="co-avatar">${esc([...(c.author||'我')][0])}</span><div><strong>${esc(c.author)}</strong> <span class="co-muted">${when(c.createdAt)}</span><p>${esc(c.text)}</p>${c.authorId===me().id?`<button class="co-link" data-co="withdraw-comment" data-id="${esc(id)}" data-cid="${esc(c.id)}">撤回这条评论</button>`:''}</div></li>`).join('')||'<li><div class="co-muted">还没有讨论。可以直接回答这个问题，或指出它的前提问题。</div></li>'}${hidden?`<li><div class="co-muted">另有 ${hidden} 条评论已被撤回或隐藏，仅保留占位。</div></li>`:''}</ol>${i.status==='published'?`<form class="co-comment-form" data-insight="${esc(id)}"><textarea class="co-comment-input" name="comment" rows="2" maxlength="${L.comment}" placeholder="回答这个问题，或指出它的前提问题…" aria-label="发现评论" required></textarea><button type="submit" class="co-btn primary">发布</button></form><div class="co-between" style="margin-top:10px"><button class="co-link" data-co="issue" data-id="${esc(id)}">对此节点有异议</button><span class="co-muted">一般学术分歧建议直接评论</span></div>`:'<p class="co-muted">待审核或已撤回的发现不开放新增评论。</p>'}`,
-      `<button class="co-link" data-co="copy-link" data-id="${esc(id)}">复制发现链接</button><div class="co-row">${mine&&i.status==='published'?btn('撤回公开','withdraw','',`data-id="${id}"`):''}${mine&&i.status==='pending'?btn('撤回审核','recall','',`data-id="${id}"`):''}${btn('继续碰撞','detail-explore','primary',`data-qid="${i.questionId}"`)}</div>`,false,'detail');
+    const sourceNames=[...new Set(i.refs.map(ref=>answer(ref.answerId)?.author).filter(Boolean))];
+    const sourceTitle=sourceNames.length>1?`来自 ${sourceNames.join(' 与 ')} 的回答`:`来自 ${sourceNames[0]||'两位作者'} 的回答`;
+    const analysis=i.relationText||i.rationale;
+    const question=i.newQuestion||i.title;
+    openModal(sourceTitle,qById(i.questionId).title,
+      `${firstFind?`<div class="co-first-ribbon">${icon('spark')}首次发现 · 这条问题是刚刚由你碰撞出来的</div>`:''}<section class="co-collision-analysis"><span>AI 分析</span>${collisionAnalysisHtml(analysis)}</section><section class="co-collision-question"><span>由此提出的深入问题</span><h3>${esc(question)}</h3>${questionDetailHtml(i,'co-question-detail')}</section><hr class="co-divider"><div class="co-between"><strong>围绕这个问题讨论 · ${comments.length}</strong></div><ol class="co-comment-list">${comments.map(c=>`<li><span class="co-avatar">${esc([...(c.author||'我')][0])}</span><div><strong>${esc(c.author)}</strong> <span class="co-muted">${when(c.createdAt)}</span><p>${esc(c.text)}</p>${c.authorId===me().id?`<button class="co-link" data-co="withdraw-comment" data-id="${esc(id)}" data-cid="${esc(c.id)}">撤回这条评论</button>`:''}</div></li>`).join('')||'<li><div class="co-muted">还没有讨论。可以直接回答这个问题，或指出它的前提问题。</div></li>'}${hidden?`<li><div class="co-muted">另有 ${hidden} 条评论已被撤回或隐藏，仅保留占位。</div></li>`:''}</ol>${i.status==='published'?`<form class="co-comment-form" data-insight="${esc(id)}"><textarea class="co-comment-input" name="comment" rows="2" maxlength="${L.comment}" placeholder="回答这个问题，或指出它的前提问题…" aria-label="发现评论" required></textarea><button type="submit" class="co-btn primary">发布</button></form><div style="margin-top:10px"><button class="co-link" data-co="issue" data-id="${esc(id)}">对此节点有异议</button></div>`:'<p class="co-muted">待审核或已撤回的发现不开放新增评论。</p>'}`,
+      '',false,'detail');
   }
   function showPublicList(qid){
     const list=publicItems(qid);
@@ -622,7 +786,7 @@
     const qid=ref.answerId.split('-')[0];
     if(document.body.dataset.questionId!==qid){location.href=`/question/${qid}?source=${encodeURIComponent(core.keyOf(ref))}${returnId?`&backInsight=${encodeURIComponent(returnId)}`:''}`;return;}
     window.ZhihuDemoView.expandAnswer(ref.answerId);
-    highlight(document.querySelector(`.AnswerItem[data-answer-id="${CSS.escape(ref.answerId)}"]`),n.quote);
+    highlight(document.querySelector(`.AnswerItem[data-answer-id="${CSS.escape(ref.answerId)}"]`),nodeQuote(n));
     if(returnId){
       document.querySelector('.co-returnbar')?.remove();
       document.querySelector('.question-header').insertAdjacentHTML('afterend',`<div class="co-returnbar co-root">正在核对来源：${esc(answer(ref.answerId).author)} ${btn('返回发现与讨论','detail','small',`data-id="${returnId}"`)}</div>`);
@@ -669,31 +833,270 @@
     menu.style.top=`${Math.max(8,Math.min(event.clientY,window.innerHeight-rect.height-8))}px`;
     menu.querySelector('button')?.focus({preventScroll:true});
   }
+  function locateQuoted(answerId,quote){
+    if(!answerId||!quote)return;
+    closeModal(true);
+    if(document.body.dataset.questionId!==answerId.split('-')[0]){jumpToAnswer(answerId);return;}
+    window.ZhihuDemoView.expandAnswer(answerId);
+    highlight(document.querySelector(`.AnswerItem[data-answer-id="${CSS.escape(answerId)}"]`),quote);
+  }
+
+  /* ---------- 卡牌产物栏：合成后的新节点卡落在页面左侧 ---------- */
+  // 三态：loading（正在加载）→ ready（已经生成好）/ failed（判定不能碰撞，置灰并可删除）。
+  const results=[];
+  const resultById=id=>results.find(r=>r.id===id);
+  const reduceMotion=()=>window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches===true;
+  function addResult(refs,titleHint){
+    const entry={id:uid('res'),refs:refs.map(r=>({...r})),status:'loading',itemId:null,
+      title:titleHint||'正在由两个观点合成新问题…',reason:'',kind:'',createdAt:Date.now(),isNew:false};
+    results.unshift(entry);
+    renderResultRail();peekRail();
+    return entry.id;
+  }
+  function failResult(id,reason,kind='blocked'){
+    const entry=resultById(id);
+    if(!entry)return;
+    entry.status='failed';entry.kind=kind;entry.reason=reason||'这两个观点无法碰撞。';
+    entry.title=kind==='no_result'?'这两个观点碰不出新问题':'产物未通过原文校验';
+    renderResultRail();peekRail();
+    toast(kind==='no_result'?'判定为不能碰撞：'+entry.reason:'碰撞失败：'+entry.reason);
+  }
+  function resultCardHtml(entry){
+    const authors=entry.refs.map(r=>cut(answer(r.answerId)?.author,6)).filter(Boolean).join(' × ');
+    if(entry.status==='loading')
+      return `<article class="co-result-card is-loading" data-result="${esc(entry.id)}" aria-busy="true"><b>${esc(entry.title)}</b><small>${esc(authors)}</small><span class="co-result-state"><span class="co-spinner" aria-hidden="true"></span>正在加载…</span></article>`;
+    if(entry.status==='failed')
+      return `<article class="co-result-card is-failed" data-result="${esc(entry.id)}"><button type="button" class="co-result-trash" data-co="discard-result" data-id="${esc(entry.id)}" aria-label="删除这张失败的卡牌" title="删除">${icon('trash')}</button><b>${esc(entry.title)}</b><small>${esc(authors)}　${esc(cut(entry.reason,40))}</small><span class="co-result-state">${icon('alert')}碰撞失败</span></article>`;
+    return `<button type="button" class="co-result-card is-ready${entry.isNew?' is-new':''}" data-result="${esc(entry.id)}" data-co="open-result" data-id="${esc(entry.id)}" title="点击查看这个新问题"><b>${esc(cut(entry.title,52))}</b><small>${esc(authors)}</small><span class="co-result-state">${icon('check')}已经生成好</span></button>`;
+  }
+  function renderResultRail(){
+    const old=root.querySelector('.co-result-rail');
+    if(!results.length){old?.remove();return;}
+    const peeking=old?.classList.contains('is-peeking')?' is-peeking':'';
+    const html=`<section class="co-result-rail co-root${peeking}" aria-label="碰撞生成的新节点"><div class="co-result-rail-head"><strong>新节点</strong><span>${results.filter(r=>r.status==='ready').length}/${results.length} 已生成</span></div>${results.map(resultCardHtml).join('')}</section>`;
+    if(old)old.outerHTML=html;else root.insertAdjacentHTML('beforeend',html);
+  }
+  // 窄屏下产物栏收成抽屉，新卡落位或状态变化时先自动探出，让用户看见，再收回。
+  let peekTimer;
+  function peekRail(duration=2600){
+    const rail=root.querySelector('.co-result-rail');
+    if(!rail)return;
+    rail.classList.add('is-peeking');
+    clearTimeout(peekTimer);
+    peekTimer=setTimeout(()=>root.querySelector('.co-result-rail')?.classList.remove('is-peeking'),duration);
+  }
+  function railCardEl(id){return root.querySelector(`.co-result-card[data-result="${CSS.escape(id)}"]`);}
+  /* 合成出的新卡牌从碰撞点出发，一路飞到左侧产物栏对应的位置。 */
+  function flyToRail(id,origin){
+    const card=railCardEl(id);
+    if(!card)return;
+    if(!origin||reduceMotion())return;
+    // 抽屉形态下先展开再量位置：临时关掉过渡，避免量到动画中间态导致落点偏移。
+    const rail=root.querySelector('.co-result-rail');
+    if(rail){rail.style.transition='none';peekRail();void rail.offsetWidth;}
+    const target=card.getBoundingClientRect();
+    if(rail)rail.style.transition='';
+    card.style.visibility='hidden';
+    const fly=document.createElement('div');
+    fly.className='co-fly-card is-born';
+    fly.textContent='新节点';
+    fly.style.left=`${origin.x}px`;fly.style.top=`${origin.y}px`;
+    fly.style.width='120px';fly.style.height='58px';
+    document.body.append(fly);
+    requestAnimationFrame(()=>{
+      fly.classList.remove('is-born');
+      fly.style.left=`${target.left+target.width/2}px`;
+      fly.style.top=`${target.top+target.height/2}px`;
+      fly.style.width=`${target.width}px`;fly.style.height=`${target.height}px`;
+    });
+    const done=()=>{fly.remove();const now=railCardEl(id);if(now)now.style.visibility='';};
+    fly.addEventListener('transitionend',done,{once:true});
+    setTimeout(done,900);
+  }
+  function flash(x,y){
+    if(reduceMotion())return;
+    const el=document.createElement('div');
+    el.className='co-merge-flash';el.style.left=`${x}px`;el.style.top=`${y}px`;
+    document.body.append(el);setTimeout(()=>el.remove(),600);
+  }
+  function firstFindBurst(x,y){
+    if(reduceMotion())return;
+    const burst=document.createElement('div');
+    burst.className='co-first-burst';burst.style.left=`${x}px`;burst.style.top=`${y}px`;
+    burst.innerHTML=Array.from({length:14},(_,i)=>{
+      const angle=(Math.PI*2*i)/14,distance=58+Math.random()*46;
+      return `<i style="--dx:${Math.round(Math.cos(angle)*distance)}px;--dy:${Math.round(Math.sin(angle)*distance)}px;animation-delay:${(i%5)*26}ms"></i>`;
+    }).join('');
+    document.body.append(burst);setTimeout(()=>burst.remove(),1100);
+  }
+  function openResult(id){
+    const entry=resultById(id);
+    if(!entry||entry.status!=='ready'||!entry.itemId)return;
+    entry.isNew=false;
+    const card=railCardEl(id);
+    const firstTime=!state.opened.includes(entry.itemId);
+    if(firstTime){
+      state.opened.push(entry.itemId);persist();
+      if(card){const rect=card.getBoundingClientRect();firstFindBurst(rect.left+rect.width/2,rect.top+rect.height/2);}
+    }
+    firstFind=firstTime;
+    setTimeout(()=>{showDetail(entry.itemId);firstFind=false;renderResultRail();},firstTime&&!reduceMotion()?420:0);
+  }
+
+  /* ---------- 把可碰撞节点当卡牌拿起来 ---------- */
+  let cardDrag=null,suppressNodeClick=false;
+  const nodeTextOf=el=>el.querySelector('.co-node-main')?.textContent||'';
+  function clearCharging(){root.querySelectorAll('.co-graph-node.is-charging').forEach(el=>el.classList.remove('is-charging'));}
+  function startCardDrag(event,el){
+    clearTimeout(nodeClickTimer);nodeClickTimer=null;
+    const ref={answerId:el.dataset.aid,nodeId:el.dataset.node};
+    const rect=el.getBoundingClientRect();
+    const ghost=document.createElement('div');
+    ghost.className='co-drag-card';
+    ghost.style.width=`${Math.round(rect.width)}px`;
+    ghost.style.height=`${Math.round(rect.height)}px`;
+    ghost.style.setProperty('--tilt',`${(Math.random()*4-2-3).toFixed(1)}deg`);
+    ghost.innerHTML=`<span>${esc(cut(nodeTextOf(el),70))}</span>`;
+    document.body.append(ghost);
+    el.classList.add('is-dragging-source');
+    document.body.classList.add('co-card-dragging');
+    cardDrag={ref,source:el,ghost,target:null,origin:{x:rect.left+rect.width/2,y:rect.top+rect.height/2}};
+    moveGhost(event.clientX,event.clientY);
+  }
+  function moveGhost(x,y){
+    if(!cardDrag)return;
+    cardDrag.ghost.style.left=`${x}px`;
+    cardDrag.ghost.style.top=`${y}px`;
+  }
+  function updateCardTarget(x,y){
+    if(!cardDrag)return;
+    const under=document.elementFromPoint(x,y)?.closest('.co-graph-node');
+    const valid=under&&under!==cardDrag.source&&under.dataset.collidable==='true'
+      &&!core.validatePair(wb.questionId,[cardDrag.ref,{answerId:under.dataset.aid,nodeId:under.dataset.node}],node);
+    if(valid&&under===cardDrag.target)return;
+    clearCharging();
+    cardDrag.target=valid?under:null;
+    cardDrag.ghost.classList.toggle('is-locked',Boolean(valid));
+    // 只要还没松手，靠近的目标卡就一直保持微微的充能动画。
+    if(valid)under.classList.add('is-charging');
+  }
+  function endCardDrag(commit){
+    if(!cardDrag)return;
+    const {source,ghost,target,ref}=cardDrag;
+    cardDrag=null;
+    document.body.classList.remove('co-card-dragging');
+    clearCharging();
+    source.classList.remove('is-dragging-source');
+    if(!commit||!target){
+      const back=source.getBoundingClientRect();
+      ghost.classList.add('is-returning');
+      ghost.style.left=`${back.left+back.width/2}px`;
+      ghost.style.top=`${back.top+back.height/2}px`;
+      setTimeout(()=>ghost.remove(),260);
+      return;
+    }
+    ghost.remove();
+    const targetRef={answerId:target.dataset.aid,nodeId:target.dataset.node};
+    const a=source.getBoundingClientRect(),b=target.getBoundingClientRect();
+    const midX=(a.left+a.width/2+b.left+b.width/2)/2,midY=(a.top+a.height/2+b.top+b.height/2)/2;
+    // 两张卡吸到一起 → 闪光 → 生成一张新卡飞向左侧。
+    source.classList.add('is-merging');target.classList.add('is-merging');
+    flash(midX,midY);
+    setTimeout(()=>{
+      source.classList.remove('is-merging');target.classList.remove('is-merging');
+      collisionRefs=[ref,targetRef];
+      startCollision({x:midX,y:midY});
+    },reduceMotion()?0:280);
+  }
+  root.addEventListener('pointerdown',event=>{
+    if(event.button!==0)return;
+    const el=event.target.closest('.co-graph-node.is-collision');
+    if(!el||event.target.closest('.co-graph-source'))return;
+    if(!wb)return;
+    const pending={el,startX:event.clientX,startY:event.clientY,pointerId:event.pointerId};
+    const onMove=moveEvent=>{
+      if(moveEvent.pointerId!==pending.pointerId)return;
+      if(!cardDrag){
+        if(Math.hypot(moveEvent.clientX-pending.startX,moveEvent.clientY-pending.startY)<6)return;
+        startCardDrag(moveEvent,pending.el);
+      }
+      moveGhost(moveEvent.clientX,moveEvent.clientY);
+      updateCardTarget(moveEvent.clientX,moveEvent.clientY);
+      moveEvent.preventDefault();
+    };
+    const onUp=upEvent=>{
+      if(upEvent.pointerId!==pending.pointerId)return;
+      document.removeEventListener('pointermove',onMove);
+      document.removeEventListener('pointerup',onUp);
+      document.removeEventListener('pointercancel',onCancel);
+      if(cardDrag){suppressNodeClick=true;setTimeout(()=>{suppressNodeClick=false;},0);endCardDrag(true);}
+    };
+    const onCancel=()=>{
+      document.removeEventListener('pointermove',onMove);
+      document.removeEventListener('pointerup',onUp);
+      document.removeEventListener('pointercancel',onCancel);
+      endCardDrag(false);
+    };
+    document.addEventListener('pointermove',onMove);
+    document.addEventListener('pointerup',onUp);
+    document.addEventListener('pointercancel',onCancel);
+  });
 
   /* ---------- 事件 ---------- */
+  document.addEventListener('dblclick',event=>{
+    const card=event.target.closest('.co-graph-node');
+    if(!card||!root.contains(card))return;
+    event.preventDefault();event.stopPropagation();
+    clearTimeout(nodeClickTimer);nodeClickTimer=null;
+    trace('node_source_opened',{answerId:card.dataset.aid,nodeId:card.dataset.node});
+    locate({answerId:card.dataset.aid,nodeId:card.dataset.node});
+  });
   document.addEventListener('click',async event=>{
     if(root.querySelector('.co-ball-menu')&&!event.target.closest('.co-ball-menu'))closeBallMenu();
+    // 刚刚完成一次卡牌拖拽合成时，抑制随之而来的 click，避免又打开一次配对。
+    if(suppressNodeClick&&event.target.closest('.co-graph-node'))return;
     const el=event.target.closest('[data-co]');
     if(!el)return;
     event.preventDefault();
     const act=el.dataset.co,id=el.dataset.id,aid=el.dataset.aid,ref={answerId:aid,nodeId:el.dataset.nid};
     if(act==='close-modal')closeModal();
+    else if(act==='open-result')openResult(id);
+    else if(act==='discard-result'){
+      const index=results.findIndex(r=>r.id===id);
+      if(index<0)return;
+      results.splice(index,1);renderResultRail();toast('已删除这张失败的卡牌。');
+    }
     else if(act==='select'||act==='select-answer'){if(dirty&&!confirm('进入选择模式会放弃未保存修改，继续吗？'))return;enterSelectMode(el.dataset.qid||aid?.split('-')[0],aid);}
     else if(act==='exit-select')exitSelectMode();
     else if(act==='toggle-pick')togglePick(aid);
     else if(act==='start-workbench')startWorkbench();
+    else if(act==='retry-map')retryMapGeneration(aid);
     else if(act==='close-workbench'){saveWorkspace();wb=null;pair=[];root.querySelector('.co-floating-stack')?.remove();decorate();}
     else if(act==='clear-pair'){pair=[];updatePair();}
     else if(act==='pair-node')pick(ref);
+    else if(act==='node-detail'){
+      clearTimeout(nodeClickTimer);nodeClickTimer=null;
+      // 浏览器会在 dblclick 前先派发 click；短暂延后单击动作，确保双击只执行原文定位。
+      if(event.detail>1)return;
+      nodeClickTimer=setTimeout(()=>{nodeClickTimer=null;showTreeNodeDetail(ref);},280);
+    }
     else if(act==='node-source')showNodeSource(ref);
+    else if(act==='tree-source')locate(ref);
+    else if(act==='locate-quote')locateQuoted(aid,el.dataset.quote);
     else if(act==='locate')locate(ref);
+    else if(act==='jump-answer'){
+      const qid=aid?.split('-')[0];
+      if(qid&&document.body.dataset.questionId!==qid){location.href=`/question/${qid}#answer-${aid}`;return;}
+      jumpToAnswer(aid);
+    }
     else if(act==='read-answer'){closeModal(true);jumpToAnswer(aid);}
     else if(act==='reader')jumpToAnswer(aid);
     else if(act==='reader-top')jumpToAnswer(wb?.reader);
     else if(act==='close-slot'){const slot=Number(el.dataset.slot);wb=core.assignSlot(wb,slot,null);pair=pair.filter(r=>wb.slots.includes(r.answerId));saveWorkspace();renderWorkbench();toast('已最小化为右下方的作者圆球。');}
     else if(act==='open-slot'){
       if(suppressBallClickId===aid){suppressBallClickId=null;return;}
-      wb=core.assignSlot(wb,1,aid);pair=[];saveWorkspace();renderWorkbench();toast(`已用 ${answer(aid).author} 替换下方浮窗。`);
+      const slot=core.preferredSlot(wb),replaced=wb.slots[slot];
+      wb=core.assignSlot(wb,slot,aid);pair=[];saveWorkspace();renderWorkbench();toast(replaced?`已用 ${answer(aid).author} 替换${slot?'下方':'上方'}浮窗。`:`已展开 ${answer(aid).author} 的浮窗。`);
     }
     else if(act==='remove-answer'){
       closeBallMenu();
@@ -844,36 +1247,30 @@
     else {decorate();showDetail(id);dialog.querySelector('.co-comment-form')?.scrollIntoView({block:'end'});}
     toast('评论已公开保存在本站。');
   });
+  /* 观点卡牌已改为 pointer 拖拽，这里只保留最小化作者圆球的 HTML5 拖放。 */
   root.addEventListener('dragstart',event=>{
     const ball=event.target.closest('.co-miniball');
-    if(ball){draggedAnswerId=ball.dataset.aid;event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',draggedAnswerId);ball.classList.add('is-dragging');return;}
-    const el=event.target.closest('.co-node[draggable="true"]');
-    if(!el)return;
-    dragRef={answerId:el.dataset.aid,nodeId:el.dataset.node};
-    event.dataTransfer.effectAllowed='copy';
-    event.dataTransfer.setData('text/plain',core.keyOf(dragRef));
+    if(!ball)return;
+    draggedAnswerId=ball.dataset.aid;event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',draggedAnswerId);ball.classList.add('is-dragging');
   });
   root.addEventListener('dragover',event=>{
-    if(draggedAnswerId){const slot=event.target.closest('.co-float-window');if(slot){event.preventDefault();event.dataTransfer.dropEffect='move';slot.classList.add('is-ball-target');}return;}
-    const el=event.target.closest('.co-node');
-    if(!el||!dragRef)return;
-    const ref={answerId:el.dataset.aid,nodeId:el.dataset.node};
-    if(!core.validatePair(wb.questionId,[dragRef,ref],node)){event.preventDefault();event.dataTransfer.dropEffect='copy';el.classList.add('drop-target');}
+    if(!draggedAnswerId)return;
+    const slot=event.target.closest('.co-float-window');
+    if(slot){event.preventDefault();event.dataTransfer.dropEffect='move';slot.classList.add('is-ball-target');}
   });
-  root.addEventListener('dragleave',event=>{const slot=event.target.closest('.co-float-window');if(slot&&!slot.contains(event.relatedTarget))slot.classList.remove('is-ball-target');const el=event.target.closest('.co-node');if(el&&!el.contains(event.relatedTarget))el.classList.remove('drop-target');});
+  root.addEventListener('dragleave',event=>{const slot=event.target.closest('.co-float-window');if(slot&&!slot.contains(event.relatedTarget))slot.classList.remove('is-ball-target');});
   root.addEventListener('drop',event=>{
+    if(!draggedAnswerId)return;
     event.preventDefault();
-    if(draggedAnswerId){const slot=event.target.closest('.co-float-window');root.querySelectorAll('.is-ball-target').forEach(e=>e.classList.remove('is-ball-target'));if(slot){wb=core.assignSlot(wb,Number(slot.dataset.slotIndex),draggedAnswerId);pair=[];saveWorkspace();renderWorkbench();toast(`已用 ${answer(draggedAnswerId).author} 替换这个浮窗。`);}draggedAnswerId=null;return;}
-    const el=event.target.closest('.co-node');
-    root.querySelectorAll('.drop-target').forEach(e=>e.classList.remove('drop-target'));
-    if(!el||!dragRef)return;
-    const refs=[dragRef,{answerId:el.dataset.aid,nodeId:el.dataset.node}];
-    dragRef=null;
-    const error=core.validatePair(wb.questionId,refs,node);
-    if(error)return toast(error);
-    collisionRefs=refs;showCollision();
+    const slot=event.target.closest('.co-float-window');
+    root.querySelectorAll('.is-ball-target').forEach(e=>e.classList.remove('is-ball-target'));
+    if(slot){wb=core.assignSlot(wb,Number(slot.dataset.slotIndex),draggedAnswerId);pair=[];saveWorkspace();renderWorkbench();toast(`已用 ${answer(draggedAnswerId).author} 替换这个浮窗。`);}
+    draggedAnswerId=null;
   });
-  root.addEventListener('dragend',()=>{dragRef=null;draggedAnswerId=null;root.querySelectorAll('.drop-target,.is-ball-target,.co-miniball.is-dragging').forEach(e=>e.classList.remove('drop-target','is-ball-target','is-dragging'));});
+  root.addEventListener('dragend',()=>{
+    draggedAnswerId=null;
+    root.querySelectorAll('.is-ball-target,.co-miniball.is-dragging').forEach(e=>e.classList.remove('is-ball-target','is-dragging'));
+  });
   root.addEventListener('pointerdown',event=>{
     const ball=event.target.closest('.co-miniball');
     if(!ball||event.button!==0)return;
@@ -922,9 +1319,9 @@
     if(!viewport||!slot?.dataset.aid)return;
     event.preventDefault();
     const aid=slot.dataset.aid,view=mapViews.get(aid)||{x:0,y:0,zoom:1},next=Math.min(1.8,Math.max(.55,view.zoom*Math.exp(-event.deltaY*.0015)));
-    const rect=viewport.getBoundingClientRect(),cx=event.clientX-rect.left,cy=event.clientY-rect.top,baseX=(viewport.clientWidth-300)/2;
-    const worldX=(cx-baseX-view.x)/view.zoom,worldY=(cy-view.y)/view.zoom;
-    view.x=cx-baseX-worldX*next;view.y=cy-worldY*next;view.zoom=next;
+    const rect=viewport.getBoundingClientRect(),cx=event.clientX-rect.left,cy=event.clientY-rect.top;
+    const worldX=(cx-view.x)/view.zoom,worldY=(cy-view.y)/view.zoom;
+    view.x=cx-worldX*next;view.y=cy-worldY*next;view.zoom=next;
     mapViews.set(aid,view);applyMapView(aid);
   },{passive:false});
   window.addEventListener('blur',()=>{dragRef=null;draggedAnswerId=null;canvasPointerDrag=null;closeBallMenu();root.querySelectorAll('.co-map-scroll.is-panning').forEach(el=>el.classList.remove('is-panning'));});

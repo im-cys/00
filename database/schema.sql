@@ -16,6 +16,16 @@ create table if not exists public.app_sessions (
 );
 create index if not exists app_sessions_expires_idx on public.app_sessions(expires_at);
 
+-- 临时多账号测试登录。只保存 scrypt 加盐哈希，测试结束后整表删除。
+create table if not exists public.test_accounts (
+  username_key text primary key,
+  username text not null,
+  user_id text not null unique references public.app_users(id) on delete cascade,
+  password_salt text not null,
+  password_hash text not null,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.oauth_states (
   state_hash text primary key,
   browser_nonce_hash text not null,

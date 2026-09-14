@@ -16,6 +16,7 @@ export async function configuration() {
   const env = { ...loaded, ...process.env };
   const privateDataSetting = env.PRIVATE_DATA_DIR || 'private-data';
   const collisionDataSetting = env.COLLISION_DATA_DIR || 'collision';
+  const operationLogSetting = env.LOCAL_OPERATION_LOG || '';
   const privateDataDir = isAbsolute(privateDataSetting) ? resolve(privateDataSetting) : resolve(root, privateDataSetting);
   return {
     configSource,
@@ -33,8 +34,11 @@ export async function configuration() {
     cloudbaseDatabaseSchema: env.CLOUDBASE_DB_SCHEMA || 'public',
     dataImportToken: env.DATA_IMPORT_TOKEN || '',
     aiModel: env.EXTRACT_MODEL || 'deepseek-v4-pro',
+    // 临时真实环境多账号测试入口。测试结束后设为 false，再删除对应路由与表。
+    testPasswordAuthEnabled: String(env.TEST_PASSWORD_AUTH_ENABLED ?? 'true').toLowerCase() === 'true',
     privateDataDir,
     collisionDataDir: isAbsolute(collisionDataSetting) ? resolve(collisionDataSetting) : resolve(privateDataDir, collisionDataSetting),
+    operationLogPath: operationLogSetting ? (isAbsolute(operationLogSetting) ? resolve(operationLogSetting) : resolve(root, operationLogSetting)) : '',
     zhihuAuth: {
       configured: Boolean((env.ZHIHU_OAUTH_APP_ID || env.ZHIHU_CLIENT_ID) && (env.ZHIHU_OAUTH_APP_KEY || env.ZHIHU_CLIENT_SECRET)),
       demoMode: String(env.ZHIHU_AUTH_DEMO_MODE ?? 'false').toLowerCase() === 'true',

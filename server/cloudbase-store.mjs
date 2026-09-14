@@ -1,5 +1,6 @@
 import cloudbase from '@cloudbase/node-sdk';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createPasswordRecord, testUserId, validateTestCredentials, verifyPassword } from './test-auth.mjs';
 
 const hash = value => createHash('sha256').update(String(value)).digest('hex');
 const iso = value => new Date(value).toISOString();
@@ -56,6 +57,29 @@ export function createCloudbaseStore(config) {
 
   async function deleteSession(token) {
     if (token) rows(await db.from('app_sessions').delete().eq('token_hash', hash(token)));
+  }
+
+  async function registerTestUser(username, password) {
+    const credentials = validateTestCredentials(username, password);
+    const existing = rows(await db.from('test_accounts').select('user_id').eq('username_key', credentials.usernameKey).limit(1))[0];
+    if (existing) throw Object.assign(new Error('该用户名已存在，请直接登录。'), { status: 409 });
+    const user = { id: testUserId(credentials.usernameKey), name: credentials.username, avatar: '', provider: 'test-password' };
+    const passwordRecord = await createPasswordRecord(credentials.password);
+    await ensureUser(user);
+    rows(await db.from('test_accounts').insert({
+      username_key: credentials.usernameKey, username: credentials.username, user_id: user.id,
+      password_salt: passwordRecord.salt, password_hash: passwordRecord.passwordHash
+    }));
+    return user;
+  }
+
+  async function authenticateTestUser(username, password) {
+    const credentials = validateTestCredentials(username, password);
+    const account = rows(await db.from('test_accounts').select('username,user_id,password_salt,password_hash').eq('username_key', credentials.usernameKey).limit(1))[0];
+    if (!account || !await verifyPassword(credentials.password, account.password_salt, account.password_hash)) {
+      throw Object.assign(new Error('用户名或密码不正确。'), { status: 401 });
+    }
+    return { id: String(account.user_id), name: account.username, avatar: '', provider: 'test-password' };
   }
 
   async function saveOAuthState(state, browserNonce, returnTo) {
@@ -185,5 +209,5 @@ export function createCloudbaseStore(config) {
     return { answers, questions };
   }
 
-  return { session, createSession, deleteSession, saveOAuthState, consumeOAuthState, getDataset, importDataset, getAnswerMaps, getAnswerMap, saveAnswerMap, getCollisionCache, saveCollisionCache, listDiscoveries, saveDiscovery, commentDiscovery, updateDiscoveryStatus, withdrawDiscoveryComment, act, comment, snapshot };
+  return { session, createSession, deleteSession, registerTestUser, authenticateTestUser, saveOAuthState, consumeOAuthState, getDataset, importDataset, getAnswerMaps, getAnswerMap, saveAnswerMap, getCollisionCache, saveCollisionCache, listDiscoveries, saveDiscovery, commentDiscovery, updateDiscoveryStatus, withdrawDiscoveryComment, act, comment, snapshot };
 }

@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node server/server.mjs",
+    "dev": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/start.ps1",
+    "dev:stop": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/stop.ps1",
     "test": "node --test scripts/*.test.mjs",
     "import:maps": "node scripts/import-maps.mjs",
     "import:data": "node scripts/import-private-data.mjs"

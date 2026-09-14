@@ -33,7 +33,12 @@ import sys
 import time
 from pathlib import Path
 
-from prompt_extract import build_messages, RETRY_HINT_BAD_JSON, RETRY_HINT_NO_THESIS
+from prompt_extract import (
+    build_messages,
+    RETRY_HINT_BAD_JSON,
+    RETRY_HINT_DENSITY,
+    RETRY_HINT_INVALID_TREE,
+)
 from schema_validator import normalize
 
 _FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$", re.S)
@@ -80,7 +85,7 @@ def parse_json(text: str):
             continue
         if isinstance(obj, dict):
             # 优先返回像抽取结果的对象，避免命中推理段里的小片段
-            if "nodes" in obj or "groups" in obj:
+            if "root" in obj or "nodes" in obj or "groups" in obj:
                 return obj
             best = best or obj
     return best
@@ -208,8 +213,12 @@ def call_llm_resilient(messages, max_attempts: int = 12, verbose: bool = False) 
 
 
 def extract_one(item: dict, mock_raw: dict | None = None, retries: int = 2,
-                verbose: bool = False) -> tuple[dict, dict]:
-    """抽取单篇。返回 (payload, report_dict)。"""
+                verbose: bool = False, known_axes=None) -> tuple[dict, dict]:
+    """抽取单篇。返回 (payload, report_dict)。
+
+    known_axes：同一问题下已登记的争议对象清单，用于让不同回答的 axis 措辞对齐。
+    跨回答比对靠 axis 相等来判断「是否在裁决同一件事」，对不齐就退化成词重叠。
+    """
     answer_id = item["answer_id"]
     question = item.get("question", "")
     source = item["content"]
@@ -218,8 +227,9 @@ def extract_one(item: dict, mock_raw: dict | None = None, retries: int = 2,
         payload, rep = normalize(mock_raw, source, answer_id, question)
         return payload, _rep2dict(rep)
 
-    messages = build_messages(question, source, item.get("author", ""))
-    raw, last_err = None, None
+    messages = build_messages(question, source, item.get("author", ""),
+                              known_axes=known_axes)
+    raw, payload, normalized_report, last_err = None, None, None, None
     for attempt in range(retries + 1):
         try:
             text = call_llm_resilient(messages, verbose=verbose)
@@ -234,23 +244,48 @@ def extract_one(item: dict, mock_raw: dict | None = None, retries: int = 2,
                 {"role": "user", "content": RETRY_HINT_BAD_JSON},
             ]
             continue
-        nodes = raw.get("nodes") or []
-        if not any(isinstance(n, dict) and n.get("role") == "thesis" for n in nodes):
-            last_err = "缺少 thesis"
+        root = raw.get("root")
+        if not isinstance(root, dict) or not root.get("statement") or not root.get("children"):
+            last_err = "缺少合法观点树"
             messages = messages + [
                 {"role": "assistant", "content": json.dumps(raw, ensure_ascii=False)[:2000]},
-                {"role": "user", "content": RETRY_HINT_NO_THESIS},
+                {"role": "user", "content": RETRY_HINT_INVALID_TREE},
+            ]
+            continue
+        payload, normalized_report = normalize(raw, source, answer_id, question)
+        if not normalized_report.ok:
+            last_err = normalized_report.fatal or "观点树未通过校验"
+            messages = messages + [
+                {"role": "assistant", "content": json.dumps(raw, ensure_ascii=False)[:3000]},
+                {"role": "user", "content": RETRY_HINT_INVALID_TREE + f"\n校验失败原因：{last_err}"},
+            ]
+            continue
+        # 可碰撞层级的统一标准是信息密度。但单篇生成实测约四分钟，一次重试的代价很高，
+        # 所以只在**严重**失配时才再要一次（极差 >45 字、比值 >2.6、或多于一个多句话节点）。
+        # 轻微偏离目标带只记录在 report 里，不触发重试。
+        density = normalized_report.stats.get("density") or {}
+        if density.get("severe") and attempt < retries:
+            last_err = "collision 信息密度严重失配"
+            detail = (
+                f"\n实测：字数区间 {density.get('len_min')}～{density.get('len_max')}，"
+                f"极差 {density.get('len_spread')}（上限 {density.get('spread_limit')}），"
+                f"最长/最短 {density.get('len_ratio')}（上限 {density.get('ratio_limit')}），"
+                f"偏离密度带的节点 {len(density.get('off_band_ids') or [])} 个，"
+                f"写成多句话的节点 {len(density.get('multi_sentence_ids') or [])} 个。"
+            )
+            messages = messages + [
+                {"role": "assistant", "content": json.dumps(raw, ensure_ascii=False)[:3000]},
+                {"role": "user", "content": RETRY_HINT_DENSITY + detail},
             ]
             continue
         break
 
-    if raw is None:
+    if raw is None or payload is None or normalized_report is None or not normalized_report.ok:
         return {}, {"answer_id": answer_id, "ok": False, "fatal": last_err or "未知失败",
                     "dropped": [], "fixed": [], "stats": {}}
 
-    payload, rep = normalize(raw, source, answer_id, question)
     payload["_raw_model_output"] = raw          # 保留原始输出，便于 prompt 迭代对照
-    return payload, _rep2dict(rep)
+    return payload, _rep2dict(normalized_report)
 
 
 def _rep2dict(rep) -> dict:
@@ -259,10 +294,15 @@ def _rep2dict(rep) -> dict:
 
 
 def strip_internal(payload: dict) -> dict:
-    """产出给前端的版本：去掉 _counter、_raw_model_output 等内部字段。"""
-    out = {k: v for k, v in payload.items() if not k.startswith("_")}
-    out["nodes"] = [{k: v for k, v in n.items() if not k.startswith("_")} for n in payload.get("nodes", [])]
-    return out
+    """产出给前端的版本：递归去掉 _counter、_raw_model_output 等内部字段。"""
+    def clean(value):
+        if isinstance(value, dict):
+            return {key: clean(item) for key, item in value.items() if not key.startswith("_")}
+        if isinstance(value, list):
+            return [clean(item) for item in value]
+        return value
+
+    return clean(payload)
 
 
 def main():

@@ -28,6 +28,7 @@ import os
 import re
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -37,7 +38,9 @@ sys.path.insert(0, str(HERE))
 from quote_locator import locate_quote          # noqa: E402
 from context_pack import build_context_pack     # noqa: E402
 from collide_engine import collide              # noqa: E402
+from pair_screen import screen_pair             # noqa: E402
 from run_extract import load_dotenv, extract_one, strip_internal  # noqa: E402
+from prompt_extract import PROMPT_VERSION        # noqa: E402
 
 # 私有内容与抽取产物均由环境变量或 private-data 目录提供，不进入 Git。
 PROJECT_ROOT = HERE.parent
@@ -278,14 +281,16 @@ def maps_for(qid: str) -> dict:
             "nodes": [{
                 "id": n.get("id"),
                 "groupId": n.get("group_id"),
-                "role": n.get("role"),
-                "text": n.get("claim_text"),
-                "type": n.get("type"),
-                "polarity": n.get("polarity"),
-                "scope": n.get("scope"),
+                "displayText": n.get("display_text") or n.get("statement", n.get("claim_text")),
+                "statement": n.get("statement", n.get("claim_text")),
+                "explanation": n.get("explanation") or "",
+                "collisionRole": n.get("collision_role"),
+                "axis": n.get("axis") or "",
+                "stance": n.get("stance") or "",
+                "conditions": _conditions_of(n),
+                "excludes": n.get("excludes") or [],
                 "quote": n.get("quote"),
                 "charOffset": n.get("char_offset"),
-                "grounded": n.get("grounded"),
             } for n in a["nodes"]],
         }
     return {"questionId": str(qid), "answers": out}
@@ -299,22 +304,99 @@ def _find(aid, nid):
     return a, n
 
 
+def _conditions_of(node):
+    """条件三分项。兼容旧缓存里的扁平 scopes：并入 premise，不丢信息。"""
+    raw = node.get("conditions")
+    if isinstance(raw, dict):
+        out = {}
+        for key in ("audience", "stage", "premise"):
+            value = raw.get(key)
+            items = value if isinstance(value, list) else ([value] if isinstance(value, str) else [])
+            out[key] = [str(item).strip() for item in items if str(item or "").strip()][:3]
+        if any(out.values()):
+            return out
+    legacy = node.get("scopes") or node.get("scope")
+    items = legacy if isinstance(legacy, list) else ([legacy] if isinstance(legacy, str) else [])
+    return {
+        "audience": [], "stage": [],
+        "premise": [str(item).strip() for item in items if str(item or "").strip()][:3],
+    }
+
+
 def _map_node_to_backend(node, answer_id, source):
     """把网页使用的 camelCase 节点恢复为碰撞管道使用的字段。"""
     quote = node.get("quote") or ""
     loc = locate_quote(source, quote, threshold=0.82) if quote else None
+    supports = []
+    for support in node.get("supports") or []:
+        support_quote = support.get("quote") or ""
+        support_loc = locate_quote(source, support_quote, threshold=0.82) if support_quote else None
+        supports.append({
+            **support,
+            "char_offset": support_loc.start if support_loc else support.get("char_offset", support.get("charOffset")),
+        })
+    excludes = node.get("excludes")
     return {
         "id": node.get("id"),
         "answer_id": answer_id,
         "group_id": node.get("group_id", node.get("groupId")),
-        "role": node.get("role"),
-        "claim_text": node.get("claim_text", node.get("text")),
-        "type": node.get("type"),
-        "polarity": node.get("polarity"),
-        "scope": node.get("scope"),
+        "statement": node.get("statement", node.get("claim_text", node.get("text"))),
+        "explanation": node.get("explanation") or "",
         "quote": quote or None,
         "char_offset": loc.start if loc else node.get("char_offset", node.get("charOffset")),
-        "grounded": bool(loc) if quote else False,
+        "collidable": node.get("collidable", node.get("kind") == "collision"),
+        "collision_role": node.get("collision_role", node.get("collisionRole")),
+        "reason_summary": node.get("reason_summary", node.get("reasonSummary")),
+        # 结构化语义字段：pair_screen 的判定输入。
+        "axis": node.get("axis") or "",
+        "stance": node.get("stance") or "",
+        "conditions": _conditions_of(node),
+        "excludes": [str(item).strip() for item in excludes if str(item or "").strip()][:2]
+                    if isinstance(excludes, list) else [],
+        "strength": node.get("strength"),
+        "tradeoff": node.get("tradeoff"),
+        "not_applicable": node.get("not_applicable", node.get("notApplicable")),
+        "supports": supports,
+        "ancestor_path": node.get("ancestor_path", node.get("ancestorPath")) or [],
+    }
+
+
+def _tree_to_frontend(node):
+    if not isinstance(node, dict):
+        return None
+    semantics = {}
+    if node.get("kind") == "collision":
+        semantics = {
+            "explanation": node.get("explanation") or "",
+            "axis": node.get("axis") or "",
+            "stance": node.get("stance") or "",
+            "conditions": node.get("conditions") or {"audience": [], "stage": [], "premise": []},
+            "excludes": node.get("excludes") or [],
+            "strength": node.get("strength"),
+            "tradeoff": node.get("tradeoff"),
+            "notApplicable": node.get("not_applicable"),
+            "supportCount": node.get("support_count", 0),
+        }
+    return {
+        "id": node.get("id"),
+        "kind": node.get("kind"),
+        "title": node.get("title"),
+        "displayText": node.get("display_text") or node.get("title") or node.get("statement"),
+        "statement": node.get("statement"),
+        "summary": node.get("summary"),
+        "collidable": bool(node.get("collidable")),
+        "collisionRole": node.get("collision_role"),
+        **semantics,
+        "sourceAnchors": [{
+            "quote": anchor.get("quote"),
+            "start": anchor.get("start"),
+            "end": anchor.get("end"),
+            "method": anchor.get("method"),
+        } for anchor in node.get("source_anchors") or []],
+        "children": [
+            child for child in (_tree_to_frontend(item) for item in node.get("children") or [])
+            if child
+        ],
     }
 
 
@@ -348,42 +430,82 @@ def _context_answers(body):
 def extract_map(body: dict) -> dict:
     answer_id = str(body.get("answerId") or "")
     content = str(body.get("content") or "")
+    trace_id = str(body.get("traceId") or "")[:80]
     if not answer_id or not content:
         return {"error": "answerId 和 content 均为必填项"}
+    started = time.monotonic()
+    print(f"[extract-map] start answer={answer_id} trace={trace_id or '-'}", flush=True)
+    known_axes = [str(a).strip() for a in (body.get("knownAxes") or []) if str(a or "").strip()]
     payload, report = extract_one({
         "answer_id": answer_id,
         "question": str(body.get("questionTitle") or ""),
         "content": content,
         "author": str(body.get("author") or ""),
-    }, verbose=False)
+    }, verbose=False, known_axes=known_axes)
     if not report.get("ok"):
+        print(f"[extract-map] invalid answer={answer_id} trace={trace_id or '-'} duration={time.monotonic() - started:.1f}s", flush=True)
         return {"error": report.get("fatal") or "节点抽取未通过校验"}
     payload = strip_internal(payload)
     frontend = {
+        "schemaVersion": payload.get("schema_version", "answer-tree-v2"),
         "answerId": answer_id,
         "backendId": answer_id,
         "legacyId": answer_id,
         "mapping": "database_generated",
         "author": body.get("author") or "",
+        "tree": _tree_to_frontend(payload.get("tree")),
         "groups": payload.get("groups") or [],
         "nodes": [{
             "id": node.get("id"),
             "groupId": node.get("group_id"),
-            "role": node.get("role"),
-            "text": node.get("claim_text"),
-            "type": node.get("type"),
-            "polarity": node.get("polarity"),
-            "scope": node.get("scope"),
+            "displayText": node.get("display_text") or node.get("statement"),
+            "statement": node.get("statement"),
+            "explanation": node.get("explanation") or "",
             "quote": node.get("quote"),
             "charOffset": node.get("char_offset"),
-            "grounded": node.get("grounded"),
+            "collidable": True,
+            "collisionRole": node.get("collision_role"),
+            "reasonSummary": node.get("reason_summary"),
+            # 结构化语义字段：碰撞预检与关系判定的输入。
+            "axis": node.get("axis") or "",
+            "stance": node.get("stance") or "",
+            "conditions": node.get("conditions") or {"audience": [], "stage": [], "premise": []},
+            "excludes": node.get("excludes") or [],
+            "strength": node.get("strength"),
+            "tradeoff": node.get("tradeoff"),
+            "notApplicable": node.get("not_applicable"),
+            "sourceAnchors": [{
+                "quote": anchor.get("quote"),
+                "start": anchor.get("start"),
+                "end": anchor.get("end"),
+                "method": anchor.get("method"),
+            } for anchor in node.get("source_anchors") or []],
+            "supports": [{
+                "id": support.get("id"),
+                "type": support.get("type"),
+                "summary": support.get("summary"),
+                "quote": support.get("quote"),
+                "charOffset": support.get("char_offset"),
+            } for support in node.get("supports") or []],
+            "ancestorPath": node.get("ancestor_path") or [],
         } for node in payload.get("nodes") or []],
+        "axes": (report.get("stats") or {}).get("semantics", {}).get("axes") or [],
     }
+    print(f"[extract-map] ready answer={answer_id} trace={trace_id or '-'} nodes={len(frontend['nodes'])} duration={time.monotonic() - started:.1f}s", flush=True)
     return {"map": frontend, "report": report}
 
 
 def do_collide(body: dict) -> dict:
-    """执行一次碰撞。入口层只做「明显不可碰」的校验（PRD §5.1 第 1 层，宽松）。"""
+    """执行一次碰撞。
+
+    三层判定：
+      1. 结构校验（节点存在、来自不同回答）；
+      2. pair_screen 零 LLM 预检，按必要条件合取判定，不合格直接 no_result；
+      3. collide() 两步模型判定（关系判定带举证责任 → 提问）。
+
+    第 2 层的意义是：不合格的配对在这里就返回，省掉一次模型调用，
+    并给出可解释的拒绝理由（对象不同 / 条件互斥 / 裁决平面不同）。
+    """
     refs = body.get("refs") or []
     if len(refs) != 2:
         return {"status": "blocked", "reason": "需要恰好两个节点"}
@@ -407,6 +529,34 @@ def do_collide(body: dict) -> dict:
 
     source_a = a1.get("source") or _STORE["sources"][a1["answer_id"]]
     source_b = a2.get("source") or _STORE["sources"][a2["answer_id"]]
+
+    def _refs_of():
+        return [
+            {"answerId": a1["answer_id"] if supplied else to_fe(a1["answer_id"]),
+             "backendId": a1["answer_id"], "nodeId": n1.get("id"),
+             "author": a1["author"], "claim": n1.get("statement"), "quote": n1.get("quote")},
+            {"answerId": a2["answer_id"] if supplied else to_fe(a2["answer_id"]),
+             "backendId": a2["answer_id"], "nodeId": n2.get("id"),
+             "author": a2["author"], "claim": n2.get("statement"), "quote": n2.get("quote")},
+        ]
+
+    # ---- 第 2 层：零 LLM 预检。必要条件合取，不做综合分歧度打分 ----
+    screen = screen_pair(n1, n2)
+    if not screen["collidable"]:
+        print(f"[collide] screened out code={screen['code']} "
+              f"a={n1.get('id')} b={n2.get('id')}", flush=True)
+        return {
+            "status": "no_result",
+            "relation_type": "无有效关系",
+            "relation_text": screen["reason"],
+            "question": None,
+            "evidence_located": [],
+            "reason": screen["reason"],
+            "screen_code": screen["code"],
+            "screen": screen["signals"],
+            "refs": _refs_of(),
+        }
+
     pa = build_context_pack(n1, source_a, a1["groups"],
                             author=a1["author"], all_nodes=a1["nodes"])
     pb = build_context_pack(n2, source_b, a2["groups"],
@@ -415,18 +565,16 @@ def do_collide(body: dict) -> dict:
     title = body.get("questionTitle") or a1["question"] or ""
     sources = {a1["answer_id"]: source_a, a2["answer_id"]: source_b}
 
-    result = collide(title, pa, pb, sources, verbose=False)
+    result = collide(title, pa, pb, sources, verbose=False,
+                     screen_signals=screen["signals"])
     result.pop("_raw", None)   # 原始输出不回传前端，避免泄露 prompt 细节
+    result["screen_code"] = screen["code"]
+    result["screen"] = screen["signals"]
     # evidence 里的 answer_id 换成前端编号，便于前端直接定位到对应回答卡片
     for e in result.get("evidence_located", []):
         e["backend_answer_id"] = e.get("answer_id")
         e["answer_id"] = e.get("answer_id") if supplied else to_fe(e.get("answer_id"))
-    result["refs"] = [
-        {"answerId": a1["answer_id"] if supplied else to_fe(a1["answer_id"]), "backendId": a1["answer_id"], "nodeId": n1.get("id"),
-         "author": a1["author"], "claim": n1.get("claim_text"), "quote": n1.get("quote")},
-        {"answerId": a2["answer_id"] if supplied else to_fe(a2["answer_id"]), "backendId": a2["answer_id"], "nodeId": n2.get("id"),
-         "author": a2["author"], "claim": n2.get("claim_text"), "quote": n2.get("quote")},
-    ]
+    result["refs"] = _refs_of()
     return result
 
 
@@ -446,7 +594,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            return
 
     def do_GET(self):
         from urllib.parse import urlparse, parse_qs
@@ -456,6 +607,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, {
                 "ok": _STORE["ready"],
                 "app": "collide-service",
+                "answerMapSchema": "answer-tree-v2",
+                "promptVersion": PROMPT_VERSION,
                 "answers": len(_STORE["answers"]),
                 "quoteOk": r.get("quote_ok"),
                 "quoteMiss": r.get("quote_miss"),

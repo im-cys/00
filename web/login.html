@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="回答节点碰撞试用站登录。">
+  <title>登录 · 回答节点碰撞</title>
+  <link rel="stylesheet" href="/web/styles.css">
+</head>
+<body class="login-page">
+  <main class="login-shell">
+    <section class="login-card" aria-labelledby="loginTitle">
+      <a class="login-logo" href="/" aria-label="返回首页">知乎</a>
+      <h1 id="loginTitle">登录试用站</h1>
+      <p class="login-intro">使用不同测试账号，可以验证发布、评论、点赞及数据持久化。</p>
+
+      <div id="testAuthPanel" class="test-auth-panel" hidden>
+        <div class="test-auth-notice"><strong>临时测试入口</strong><span>仅用于多账号真实环境测试，上线前会移除。</span></div>
+        <form id="testAuthForm" class="test-auth-form">
+          <label><span>用户名</span><input name="username" autocomplete="username" minlength="2" maxlength="24" pattern="[A-Za-z0-9_.\-\u4e00-\u9fff]{2,24}" placeholder="例如：test_user_01" required></label>
+          <label><span>密码</span><input name="password" type="password" autocomplete="current-password" minlength="8" maxlength="72" placeholder="8–72 个字符" required></label>
+          <p id="loginError" class="login-error" role="alert" hidden></p>
+          <div class="test-auth-actions">
+            <button class="login-primary" type="submit" data-action="login">登录</button>
+            <button class="login-secondary" type="submit" data-action="register">创建账号并登录</button>
+          </div>
+        </form>
+      </div>
+
+      <div id="loginDivider" class="login-divider" hidden><span>或</span></div>
+      <a id="zhihuLogin" class="zhihu-login" href="/auth/zhihu">使用知乎授权登录</a>
+      <p id="loginUnavailable" class="login-unavailable" hidden>当前没有可用的登录方式，请检查服务端配置。</p>
+      <p class="login-privacy">测试账号的密码仅保存加盐哈希，不保存明文。</p>
+    </section>
+  </main>
+  <script src="/web/login.js"></script>
+</body>
+</html>

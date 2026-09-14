@@ -260,12 +260,11 @@
 
   function startLogin() {
     if (community.session.user) return true;
-    if (!community.session.configured && !community.session.demoMode) {
+    if (!community.session.configured && !community.session.demoMode && !community.session.testPasswordAuthEnabled) {
       alert('知乎登录尚未配置。请先申请知乎授权应用并在服务端填写凭据。');
       return false;
     }
-    if (!community.session.configured && community.session.demoMode && !confirm('知乎正式授权尚未配置。现在将创建一个明确标注的本地试用账号，以便测试互动功能。继续吗？')) return false;
-    location.href = `/auth/zhihu?return_to=${encodeURIComponent(location.pathname + location.search)}`;
+    location.href = `/login?return_to=${encodeURIComponent(location.pathname + location.search)}`;
     return false;
   }
 

@@ -1,17 +1,21 @@
 import http from 'node:http';
-import { readFile } from 'node:fs/promises';
-import { resolve, extname } from 'node:path';
+import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { dirname, resolve, extname } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { root, configuration } from './config.mjs';
 import { createStore } from './store.mjs';
 
-const PROMPT_VERSION = 'answer-map-v1';
-const COLLISION_VERSION = 'collision-v1';
+const PROMPT_VERSION = 'answer-tree-v2.8-node-explanation';
+// v2：碰撞判定改为「零成本预检闸门 + 两步模型判定（关系判定带举证责任 → 提问）」。
+// 判定口径变了，旧缓存必须失效，否则同一对节点会继续命中 v1 的误判结果。
+const COLLISION_VERSION = 'collision-v5-question-detail';
+const ANSWER_MAP_SCHEMA = 'answer-tree-v2';
+const MAP_GENERATION_TIMEOUT_MS = 15 * 60 * 1000;
 const sha256 = value => createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex');
 const safeReturnTo = value => /^\/(?!\/)/.test(value || '') ? value : '/';
 const cookies = request => Object.fromEntries(String(request.headers.cookie || '').split(';').map(item => item.trim().split('=').map(decodeURIComponent)).filter(parts => parts.length === 2));
-const secureFor = config => String(config.zhihuAuth?.redirectUri || '').startsWith('https:');
+const secureFor = (config, request) => String(config.zhihuAuth?.redirectUri || '').startsWith('https:') || String(request?.headers?.['x-forwarded-proto'] || '').split(',')[0].trim() === 'https';
 const cookie = (name, value, { clear = false, secure = false, maxAge = 2592000 } = {}) => `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${clear ? 0 : maxAge}${secure ? '; Secure' : ''}`;
 
 async function jsonBody(req, maximum = 20000) {
@@ -31,25 +35,65 @@ function answerFrom(dataset, answerId) {
   return null;
 }
 function publicMapScript(maps) { return `window.COLLISION_MAPS = ${JSON.stringify(maps || {})};\n`; }
+function currentAnswerMaps(maps) { return Object.fromEntries(Object.entries(maps || {}).filter(([, map]) => map?.schemaVersion === ANSWER_MAP_SCHEMA)); }
 function privateDataScript(dataset) { return `window.ZHIHU_DEMO_DATA = ${JSON.stringify(dataset || { questions: [] })};\n`; }
 function rawJsonId(text, key) {
   const match = String(text).match(new RegExp(`"${key}"\\s*:\\s*(?:"([^"]+)"|(\\d+))`));
   return match ? (match[1] || match[2]) : '';
 }
 
+export function publicMapError(error) {
+  const message = String(error?.message || error || '');
+  if (/TimeoutError|aborted due to timeout|generation_timeout/i.test(message)) return '本次模型生成超过 15 分钟，任务已停止，请重新生成。';
+  if (/10013|Failed to establish a new connection|ECONNREFUSED|ENETUNREACH|fetch failed/i.test(message)) return '无法连接模型接口。请检查本机网络或代理权限后重新生成。';
+  if (/429|rate.?limit|额度|拥塞/i.test(message)) return '模型接口当前拥塞或额度受限，请稍后重新生成。';
+  if (/JSON|校验|观点树|collision|support/i.test(message)) return '模型已返回内容，但没有通过新版观点树校验，请重新生成。';
+  return '结构图生成失败，请稍后重试。';
+}
+
 export function createServer(config, store) {
   const collideBase = config.collideBase || 'http://127.0.0.1:3311';
   const mapJobs = new Map();
+  const traceEvents = new Set(['select_mode_entered', 'answer_selected', 'answer_unselected', 'workbench_opened', 'map_generate_started', 'map_generate_succeeded', 'map_generate_failed', 'map_generate_retried']);
+  const audit = async (event, details = {}) => {
+    if (!config.operationLogPath) return;
+    const clean = {
+      at: new Date().toISOString(), event,
+      traceId: String(details.traceId || '').slice(0, 80),
+      questionId: String(details.questionId || '').slice(0, 40),
+      answerId: String(details.answerId || '').slice(0, 80),
+      answerIds: Array.isArray(details.answerIds) ? details.answerIds.slice(0, 5).map(value => String(value).slice(0, 80)) : undefined,
+      selectedCount: Number.isFinite(details.selectedCount) ? details.selectedCount : undefined,
+      status: String(details.status || '').slice(0, 40),
+      stage: String(details.stage || '').slice(0, 60),
+      durationMs: Number.isFinite(details.durationMs) ? details.durationMs : undefined,
+      nodeCount: Number.isFinite(details.nodeCount) ? details.nodeCount : undefined,
+      errorCategory: String(details.errorCategory || '').slice(0, 60),
+    };
+    Object.keys(clean).forEach(key => clean[key] === undefined && delete clean[key]);
+    try {
+      await mkdir(dirname(config.operationLogPath), { recursive: true });
+      await appendFile(config.operationLogPath, `${JSON.stringify(clean)}\n`, 'utf8');
+    } catch (error) { console.error('[operation-trace]', error.message); }
+  };
   const files = new Map([
-    ['/', 'web/index.html'], ['/question.html', 'web/question.html'], ['/web/site.js', 'web/site.js'],
+    ['/', 'web/index.html'], ['/login', 'web/login.html'], ['/question.html', 'web/question.html'], ['/web/site.js', 'web/site.js'], ['/web/login.js', 'web/login.js'],
     ['/web/styles.css', 'web/styles.css'], ['/web/collision.css', 'web/collision.css'], ['/web/collision.js', 'web/collision.js'], ['/web/collision-core.js', 'web/collision-core.js']
   ]);
   const allowedHosts = new Set((config.allowedHosts || []).map(value => value.toLowerCase()));
   const allowedOrigins = new Set(config.allowedOrigins || []);
   const hostName = value => { try { return new URL(`http://${value}`).hostname.toLowerCase(); } catch { return ''; } };
-  const sessionInfo = user => ({ user, provider: 'zhihu', configured: Boolean(config.zhihuAuth?.configured), demoMode: Boolean(config.zhihuAuth?.demoMode) });
+  const sessionInfo = user => ({ user, provider: user?.provider || null, configured: Boolean(config.zhihuAuth?.configured), demoMode: Boolean(config.zhihuAuth?.demoMode), testPasswordAuthEnabled: Boolean(config.testPasswordAuthEnabled) });
   const send = (res, status, data) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(data)); };
   const currentUser = req => store.session(cookies(req).qm_session);
+  const loginAttempts = new Map();
+  const loginAttemptKey = (req, username) => `${String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim()}|${String(username || '').normalize('NFKC').trim().toLowerCase()}`;
+  const checkLoginRate = key => {
+    const now = Date.now(); const recent = (loginAttempts.get(key) || []).filter(at => now - at < 10 * 60000);
+    loginAttempts.set(key, recent);
+    if (recent.length >= 12) throw Object.assign(new Error('尝试次数过多，请 10 分钟后再试。'), { status: 429 });
+  };
+  const failedLogin = key => loginAttempts.set(key, [...(loginAttempts.get(key) || []), Date.now()]);
   const validStoredMap = async answerId => {
     const dataset = datasetValue(await store.getDataset());
     const source = answerFrom(dataset, answerId);
@@ -59,15 +103,32 @@ export function createServer(config, store) {
     const valid = cached && (cached.source_hash || cached.sourceHash) === sourceHash && cached.model === config.aiModel && (cached.prompt_version || cached.promptVersion) === PROMPT_VERSION;
     return { source, cached: valid ? cached : null, sourceHash };
   };
-  const startMapJob = ({ answerId, source, sourceHash, user }) => {
-    const job = { answerId, status: 'processing', startedAt: Date.now() };
+  // 同一问题下已登记的争议对象。跨回答比对靠 axis 相等判断「是否在裁决同一件事」，
+  // 所以生成新结构图时要把已有说法带给模型复用，措辞对不齐会退化成词重叠匹配。
+  const knownAxesFor = async questionId => {
+    try {
+      const maps = currentAnswerMaps(await store.getAnswerMaps(questionId));
+      const axes = [];
+      for (const map of Object.values(maps)) {
+        for (const axis of map?.axes || (map?.nodes || []).map(node => node?.axis)) {
+          const value = String(axis || '').trim();
+          if (value && !axes.includes(value)) axes.push(value);
+        }
+      }
+      return axes.slice(0, 12);
+    } catch { return []; }
+  };
+  const startMapJob = ({ answerId, source, sourceHash, user, traceId }) => {
+    const job = { answerId, status: 'processing', startedAt: Date.now(), traceId };
     mapJobs.set(answerId, job);
+    void audit('map_generate_started', { traceId, answerId, questionId: answerId.split('-')[0], status: 'processing', stage: 'node_to_extractor' });
     void (async () => {
       try {
+        const knownAxes = await knownAxesFor(answerId.split('-')[0]);
         const upstream = await fetch(`${collideBase}/extract-map`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ answerId, questionTitle: source.question.title || '', content: source.content, author: source.answer.author || '' }),
-          signal: AbortSignal.timeout(300000)
+          body: JSON.stringify({ answerId, traceId, questionTitle: source.question.title || '', content: source.content, author: source.answer.author || '', knownAxes }),
+          signal: AbortSignal.timeout(MAP_GENERATION_TIMEOUT_MS)
         });
         const upstreamText = await upstream.text();
         let result;
@@ -77,9 +138,13 @@ export function createServer(config, store) {
         await store.saveAnswerMap({ answerId, questionId: answerId.split('-')[0], payload: result.map, sourceHash, model: config.aiModel, promptVersion: PROMPT_VERSION });
         await store.act(user, { questionId: answerId.split('-')[0], answerId, action: 'map' });
         Object.assign(job, { status: 'ready', map: result.map, finishedAt: Date.now() });
+        void audit('map_generate_succeeded', { traceId, answerId, questionId: answerId.split('-')[0], status: 'ready', stage: 'saved', durationMs: job.finishedAt - job.startedAt, nodeCount: result.map.nodes?.length || 0 });
       } catch (error) {
         console.error(`[map:${answerId}]`, error);
-        Object.assign(job, { status: 'failed', error: '结构图生成失败，请稍后重试。', finishedAt: Date.now() });
+        const shownError = publicMapError(error);
+        Object.assign(job, { status: 'failed', error: shownError, finishedAt: Date.now() });
+        const errorCategory = shownError.includes('超过 15 分钟') ? 'generation_timeout' : shownError.startsWith('无法连接') ? 'model_network' : shownError.startsWith('模型接口') ? 'model_rate_limit' : shownError.includes('校验') ? 'tree_validation' : 'unknown';
+        void audit('map_generate_failed', { traceId, answerId, questionId: answerId.split('-')[0], status: 'failed', stage: 'extractor_or_model', durationMs: job.finishedAt - job.startedAt, errorCategory });
       }
     })();
     return job;
@@ -99,7 +164,7 @@ export function createServer(config, store) {
 
       if (req.method === 'GET' && path === '/api/health') {
         const databaseCredentialMode = config.cloudbaseApiKey ? 'api-key' : config.cloudbaseSecretId && config.cloudbaseSecretKey ? 'secret-pair' : 'none';
-        return send(res, 200, { ok: true, app: 'answer-collision', database: config.useDatabase, databaseCredentialConfigured: Boolean(config.cloudbaseApiKey), databaseCredentialMode, model: config.aiModel });
+        return send(res, 200, { ok: true, app: 'answer-collision', answerMapSchema: ANSWER_MAP_SCHEMA, promptVersion: PROMPT_VERSION, database: config.useDatabase, databaseCredentialConfigured: Boolean(config.cloudbaseApiKey), databaseCredentialMode, model: config.aiModel });
       }
 
       if (req.method === 'POST' && path === '/api/admin/import') {
@@ -112,6 +177,7 @@ export function createServer(config, store) {
           await store.importDataset(input.data, contentHash);
           let mapCount = 0;
           for (const [answerId, payload] of Object.entries(input.maps || {})) {
+            if (payload?.schemaVersion !== ANSWER_MAP_SCHEMA) continue;
             const source = answerFrom(input.data, answerId);
             await store.saveAnswerMap({ answerId, questionId: answerId.split('-')[0], payload, sourceHash: sha256(source?.content || ''), model: input.mapModel || 'imported', promptVersion: input.mapPromptVersion || 'imported-v1' });
             mapCount++;
@@ -123,7 +189,32 @@ export function createServer(config, store) {
         }
       }
 
+      if (req.method === 'POST' && path === '/api/local/trace' && !config.useDatabase) {
+        const input = await jsonBody(req, 4000);
+        const event = String(input.event || '');
+        if (!traceEvents.has(event)) return send(res, 400, { error: '不支持的本地轨迹事件。' });
+        await audit(event, input);
+        return send(res, 200, { ok: true });
+      }
+
       if (req.method === 'GET' && path === '/api/auth/session') return send(res, 200, sessionInfo(await currentUser(req)));
+
+      if (req.method === 'POST' && /^\/api\/auth\/test\/(register|login)$/.test(path)) {
+        if (!config.testPasswordAuthEnabled) return send(res, 404, { error: '测试账号登录已关闭。' });
+        const input = await jsonBody(req, 4000); const key = loginAttemptKey(req, input.username);
+        try {
+          checkLoginRate(key);
+          const user = path.endsWith('/register')
+            ? await store.registerTestUser(input.username, input.password)
+            : await store.authenticateTestUser(input.username, input.password);
+          const token = await store.createSession(user); loginAttempts.delete(key);
+          res.setHeader('Set-Cookie', cookie('qm_session', token, { secure: secureFor(config, req) }));
+          return send(res, 200, { ok: true, returnTo: safeReturnTo(input.returnTo), session: sessionInfo(user) });
+        } catch (error) {
+          failedLogin(key);
+          return send(res, error.status || 500, { error: error.status ? error.message : '测试账号登录失败。' });
+        }
+      }
 
       if (req.method === 'GET' && path === '/auth/zhihu') {
         const returnTo = safeReturnTo(url.searchParams.get('return_to'));
@@ -137,13 +228,13 @@ export function createServer(config, store) {
           target.searchParams.set('redirect_uri', config.zhihuAuth.redirectUri);
           target.searchParams.set('state', state);
           if (config.zhihuAuth.scope) target.searchParams.set('scope', config.zhihuAuth.scope);
-          res.writeHead(302, { Location: target.href, 'Set-Cookie': cookie('qm_oauth_nonce', browserNonce, { secure: secureFor(config), maxAge: 600 }), 'Cache-Control': 'no-store' }); return res.end();
+          res.writeHead(302, { Location: target.href, 'Set-Cookie': cookie('qm_oauth_nonce', browserNonce, { secure: secureFor(config, req), maxAge: 600 }), 'Cache-Control': 'no-store' }); return res.end();
         }
         if (config.zhihuAuth?.demoMode) {
           const suffix = randomBytes(3).toString('hex');
           const user = { id: `zhihu-demo-${suffix}`, name: `知乎试用用户 ${suffix.toUpperCase()}`, avatar: '', provider: 'zhihu-demo' };
           const token = await store.createSession(user);
-          res.writeHead(302, { Location: returnTo, 'Set-Cookie': cookie('qm_session', token, { secure: secureFor(config) }), 'Cache-Control': 'no-store' }); return res.end();
+          res.writeHead(302, { Location: returnTo, 'Set-Cookie': cookie('qm_session', token, { secure: secureFor(config, req) }), 'Cache-Control': 'no-store' }); return res.end();
         }
         return send(res, 503, { error: '知乎登录尚未配置。' });
       }
@@ -170,12 +261,12 @@ export function createServer(config, store) {
         if (!profileResponse.ok || !id) return send(res, 502, { error: '无法读取有效的知乎用户资料。' });
         const user = { id: `zhihu-${id}`, name: String(profile.fullname || profile.name || '知乎用户').slice(0, 80), avatar: String(profile.avatar_path || profile.avatar_url || profile.avatar || '').slice(0, 500), provider: 'zhihu' };
         const token = await store.createSession(user);
-        res.writeHead(302, { Location: pending.returnTo, 'Set-Cookie': [cookie('qm_session', token, { secure: secureFor(config) }), cookie('qm_oauth_nonce', '', { clear: true, secure: secureFor(config) })], 'Cache-Control': 'no-store' }); return res.end();
+        res.writeHead(302, { Location: pending.returnTo, 'Set-Cookie': [cookie('qm_session', token, { secure: secureFor(config, req) }), cookie('qm_oauth_nonce', '', { clear: true, secure: secureFor(config, req) })], 'Cache-Control': 'no-store' }); return res.end();
       }
 
       if (req.method === 'POST' && path === '/api/auth/logout') {
         await store.deleteSession(cookies(req).qm_session);
-        res.setHeader('Set-Cookie', cookie('qm_session', '', { clear: true, secure: secureFor(config) }));
+        res.setHeader('Set-Cookie', cookie('qm_session', '', { clear: true, secure: secureFor(config, req) }));
         return send(res, 200, { ok: true });
       }
 
@@ -211,7 +302,7 @@ export function createServer(config, store) {
         try { const upstream = await fetch(`${collideBase}/health`, { signal: AbortSignal.timeout(5000) }); return send(res, 200, { ...(await upstream.json()), connected: true }); }
         catch { return send(res, 200, { ok: false, connected: false, error: '碰撞服务未启动。' }); }
       }
-      if (req.method === 'GET' && path === '/api/collide/maps') return send(res, 200, { questionId: url.searchParams.get('qid') || '', answers: await store.getAnswerMaps(url.searchParams.get('qid') || '') });
+      if (req.method === 'GET' && path === '/api/collide/maps') return send(res, 200, { questionId: url.searchParams.get('qid') || '', answers: currentAnswerMaps(await store.getAnswerMaps(url.searchParams.get('qid') || '')) });
 
       if (req.method === 'GET' && path === '/api/maps/generate') {
         const user = await currentUser(req); if (!user) return send(res, 401, { error: '请先使用知乎账号登录。' });
@@ -230,7 +321,7 @@ export function createServer(config, store) {
 
       if (req.method === 'POST' && path === '/api/maps/generate') {
         const user = await currentUser(req); if (!user) return send(res, 401, { error: '请先使用知乎账号登录。' });
-        const input = await jsonBody(req); const answerId = String(input.answerId || '');
+        const input = await jsonBody(req); const answerId = String(input.answerId || ''); const traceId = String(input.traceId || '').slice(0, 80);
         if (!answerId) return send(res, 400, { error: '回答编号不能为空。' });
         const { source, cached, sourceHash } = await validStoredMap(answerId);
         if (!source?.content) return send(res, 404, { error: '没有找到这篇回答的私有正文。' });
@@ -238,7 +329,7 @@ export function createServer(config, store) {
         const existing = mapJobs.get(answerId);
         if (existing?.status === 'processing') return send(res, 202, { answerId, status: 'processing' });
         if (existing) mapJobs.delete(answerId);
-        startMapJob({ answerId, source, sourceHash, user });
+        startMapJob({ answerId, source, sourceHash, user, traceId });
         return send(res, 202, { answerId, status: 'processing' });
       }
 
@@ -259,7 +350,7 @@ export function createServer(config, store) {
       }
 
       if (req.method === 'GET' && (path === '/content/data.js' || path === '/content/collision-maps.js')) {
-        const body = path.endsWith('data.js') ? privateDataScript(datasetValue(await store.getDataset())) : publicMapScript(await store.getAnswerMaps());
+        const body = path.endsWith('data.js') ? privateDataScript(datasetValue(await store.getDataset())) : publicMapScript(currentAnswerMaps(await store.getAnswerMaps()));
         res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(body);
       }
 
@@ -267,7 +358,7 @@ export function createServer(config, store) {
       const pageRequest = path === '/' || path === '/question.html' || /^\/question\/[\w-]+$/.test(path);
       if (req.method === 'GET' && pageRequest && !await currentUser(req)) {
         const returnTo = safeReturnTo(req.url);
-        res.writeHead(302, { Location: `/auth/zhihu?return_to=${encodeURIComponent(returnTo)}`, 'Cache-Control': 'no-store' }); return res.end();
+        res.writeHead(302, { Location: `/login?return_to=${encodeURIComponent(returnTo)}`, 'Cache-Control': 'no-store' }); return res.end();
       }
       if (req.method === 'GET' && (files.has(path) || /^\/question\/[\w-]+$/.test(path) || vendorFile)) {
         const file = vendorFile || files.get(path) || 'web/question.html'; const data = await readFile(resolve(root, file));
@@ -285,6 +376,10 @@ export function createServer(config, store) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const config = await configuration();
   const store = await createStore(config);
+  if (!config.useDatabase && store.pruneAnswerMaps) {
+    const removed = await store.pruneAnswerMaps(ANSWER_MAP_SCHEMA, PROMPT_VERSION);
+    if (removed) console.log(`已删除 ${removed} 份旧版回答结构图及其碰撞缓存。`);
+  }
   const server = createServer(config, store);
   server.on('error', error => { console.error(error.code === 'EADDRINUSE' ? `端口 ${config.port} 已被占用。` : error.message); process.exitCode = 1; });
   server.listen(config.port, config.host, () => console.log(`回答节点碰撞站 http://${config.host}:${config.port} | database=${config.useDatabase} | model=${config.aiModel}`));

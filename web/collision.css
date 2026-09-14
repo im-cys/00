@@ -38,7 +38,7 @@ body:has(.co-pickbar) .co-question-aside{bottom:78px}body:has(.co-pickbar){paddi
 
 /* Inline discovery questions on the question page. */
 .co-discovery-list{margin-top:12px;border:1px solid #e1e8f2;border-radius:6px;background:#fff;overflow:hidden}.co-discovery-item+.co-discovery-item{border-top:1px solid #e7edf5}.co-discovery-summary{width:100%;display:grid;grid-template-columns:28px minmax(0,1fr) auto;gap:10px;align-items:start;padding:13px 14px;border:0;background:#fff;text-align:left;color:#24364c;font:inherit;cursor:pointer}.co-discovery-summary:hover{background:#f7faff}.co-discovery-summary>span:nth-child(2){min-width:0}.co-discovery-summary strong{display:block;font-size:14px;line-height:1.6}.co-discovery-summary small{display:flex;gap:16px;flex-wrap:wrap;margin-top:4px;color:#7f8ba0;font-size:11px;font-weight:400}.co-discovery-summary small i{font-style:normal}.co-discovery-summary>b{align-self:center;color:#58718f;font-size:12px;font-weight:500;white-space:nowrap}.co-discovery-spark{width:26px;height:26px;display:grid;place-items:center;border-radius:6px;background:#eaf3ff;color:#056de8}.co-discovery-spark .co-icon{width:15px;height:15px}.co-discovery-item.is-expanded>.co-discovery-summary{background:#f4f8ff}.co-discovery-item.is-targeted{animation:co-target-discovery 2.2s ease-out}@keyframes co-target-discovery{0%,35%{box-shadow:inset 0 0 0 2px #2f80ed;background:#edf5ff}100%{box-shadow:inset 0 0 0 0 transparent}}
-.co-inline-detail{padding:15px;border-top:1px solid #dfe9f6;background:#fbfcff}.co-inline-detail[hidden]{display:none}.co-inline-nodes{display:grid;grid-template-columns:1fr 1fr;gap:10px}.co-inline-nodes section{padding:11px 12px;border:1px solid #e0e7f0;border-radius:5px;background:#fff}.co-inline-nodes span{color:#708096;font-size:11px}.co-inline-nodes p{margin:5px 0 0;color:#344960;font-size:13px;line-height:1.7}.co-inline-analysis{margin-top:10px;padding:11px 12px;border-radius:5px;background:#edf5ff;color:#355a86}.co-inline-analysis strong{font-size:12px}.co-inline-analysis p{margin:4px 0 0;font-size:13px;line-height:1.75}.co-inline-comments{margin-top:13px}.co-inline-comments>div>strong{font-size:13px}.co-inline-comments ol{list-style:none;margin:7px 0 0;padding:0}.co-inline-comments li{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid #edf0f4;font-size:12px}.co-inline-comments li b{flex:none}.co-inline-comments li span{color:#53657d}.co-inline-comment-form{padding-top:10px}.co-inline-comment-form textarea{min-height:42px;font-size:12px}.co-inline-comment-form .co-btn{padding:7px 12px;font-size:12px}.co-association .co-discovery-list{margin-top:10px}.co-association .co-discovery-summary{padding:10px 11px}.co-association .co-inline-detail{padding:12px}.co-question-discoveries>.co-between>.co-muted{font-size:12px}
+.co-inline-detail{padding:15px;border-top:1px solid #dfe9f6;background:#fbfcff}.co-inline-detail[hidden]{display:none}.co-inline-analysis{padding:14px 15px;border-left:3px solid #2787ed;border-radius:4px;background:#edf5ff;color:#244d7c}.co-inline-analysis strong{display:block;margin-bottom:7px;font-size:13px}.co-inline-analysis p{margin:0;font-size:13px;line-height:1.85}.co-inline-analysis p+p{margin-top:8px}.co-inline-question{margin-top:12px;padding:12px 14px;border:1px solid #dce7f5;border-radius:5px;background:#fff}.co-inline-question span{color:#708096;font-size:11px}.co-inline-question h3{margin:5px 0 0;color:#172b4d;font-size:16px;line-height:1.55}.co-inline-question-detail{margin-top:6px}.co-inline-question-detail p{margin:0;color:#41556e;font-size:13px;line-height:1.9}.co-inline-question-detail p+p{margin-top:7px}.co-inline-comments{margin-top:13px}.co-inline-comments>div>strong{font-size:13px}.co-inline-comments ol{list-style:none;margin:7px 0 0;padding:0}.co-inline-comments li{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid #edf0f4;font-size:12px}.co-inline-comments li b{flex:none}.co-inline-comments li span{color:#53657d}.co-inline-comment-form{padding-top:10px}.co-inline-comment-form textarea{min-height:42px;font-size:12px}.co-inline-comment-form .co-btn{padding:7px 12px;font-size:12px}.co-association .co-discovery-list{margin-top:10px}.co-association .co-discovery-summary{padding:10px 11px}.co-association .co-inline-detail{padding:12px}.co-question-discoveries>.co-between>.co-muted{font-size:12px}
 
 /* The answer selector is a small plug-in surface in the otherwise unused right rail. */
 .co-select-fab{position:fixed;z-index:980;right:max(18px,calc((100vw - 1220px)/2 + 12px));bottom:34px;width:348px;display:flex;align-items:center;gap:11px;padding:13px 16px;border:1px solid #b8d5fb;border-radius:9px;background:#fff;color:#056de8;box-shadow:0 10px 30px rgba(31,57,91,.16);text-align:left;cursor:pointer}.co-select-fab:hover{background:#f3f8ff;border-color:#72aaf0}.co-select-fab>.co-icon{width:25px;height:25px}.co-select-fab span{display:flex;flex-direction:column}.co-select-fab strong{font-size:14px}.co-select-fab small{color:#8590a6;font-size:11px;font-weight:400}.co-pickbar{left:auto;right:max(18px,calc((100vw - 1220px)/2 + 12px));bottom:28px;width:348px;padding:14px;flex-direction:column;align-items:stretch;border:1px solid #bdd7f8;border-radius:10px;box-shadow:0 12px 34px rgba(31,57,91,.2)}.co-pickbar .co-row{justify-content:flex-end}.co-pickbar-info .co-muted{white-space:normal;line-height:1.6}
@@ -46,7 +46,7 @@ body:has(.co-pickbar) .co-question-aside{bottom:78px}body:has(.co-pickbar){paddi
 /* Keep the A/B maps stacked inside the question page's right rail. */
 .co-floating-stack{right:max(18px,calc((100vw - 1220px)/2 + 12px));width:348px}.co-network{width:var(--canvas-w);height:var(--canvas-h);margin:0 auto}.co-network-lines{width:var(--canvas-w);height:var(--canvas-h)}.co-network .co-node{width:var(--node-w);height:var(--node-h);padding:7px 8px}.co-network .co-node-main{-webkit-line-clamp:2;font-size:11px}.co-network .co-node-meta{gap:3px}.co-network .co-node-meta .co-badge{font-size:9px}.co-network .co-node-group{display:none}.co-floating-stack .co-map-head{min-height:50px}.co-floating-stack .co-slot-select{display:none}.co-floating-stack .co-collapsed{min-height:36px}.co-floating-stack .co-pair-bar{min-height:40px;font-size:11px}.co-floating-stack .co-wb-footnote{font-size:9px}
 @media(max-width:1180px){.co-select-fab,.co-pickbar,.co-floating-stack{right:10px;width:348px}}
-@media(max-width:820px){.co-select-fab{right:12px;bottom:18px;width:min(330px,calc(100vw - 24px))}.co-pickbar{right:10px;bottom:10px;width:calc(100vw - 20px)}.co-floating-stack{right:8px;width:auto}.co-inline-nodes{grid-template-columns:1fr}}
+@media(max-width:820px){.co-select-fab{right:12px;bottom:18px;width:min(330px,calc(100vw - 24px))}.co-pickbar{right:10px;bottom:10px;width:calc(100vw - 20px)}.co-floating-stack{right:8px;width:auto}}
 
 /* Independent floating maps, compact selector and minimized author balls. */
 .co-select-fab{right:max(14px,calc((100vw - 1220px)/2 + 12px));bottom:22px;width:268px;padding:10px 13px;border-radius:7px;gap:9px}.co-select-fab>.co-icon{width:21px;height:21px}.co-select-fab strong{font-size:13px}.co-select-fab small{font-size:10px}.co-pickbar{right:max(14px,calc((100vw - 1220px)/2 + 12px));bottom:18px;width:286px;padding:11px 12px;border-radius:8px;gap:9px}.co-pickbar-info strong{display:flex;align-items:center;justify-content:space-between;gap:8px}.co-pickbar-info strong em{padding:2px 8px;border-radius:10px;background:#e8f2ff;color:#056de8;font-size:11px;font-style:normal;font-weight:600}.co-pickbar-info .co-muted{font-size:10px}.co-pickbar .co-btn{padding:5px 9px;font-size:11px}
@@ -75,4 +75,220 @@ body:has(.co-pickbar) .co-question-aside{bottom:78px}body:has(.co-pickbar){paddi
 .co-ball-menu{position:fixed;z-index:1400;width:148px;padding:6px;border:1px solid #d9e2ee;border-radius:8px;background:#fff;box-shadow:0 10px 28px rgba(31,52,80,.2);font:12px/1.5 -apple-system,"Microsoft YaHei",sans-serif}
 .co-ball-menu span{display:block;padding:5px 8px;color:#8590a6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .co-ball-menu button{display:block;width:100%;padding:7px 8px;border:0;border-radius:5px;background:transparent;color:#d33b3b;text-align:left;cursor:pointer}
+.co-generation-state{height:100%;min-height:150px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:#fbfdff;color:#6f7f94;text-align:center;cursor:default;user-select:text}.co-generation-state .co-spinner{width:28px;height:28px;margin-bottom:14px;border-width:3px}.co-generation-state>.co-icon{width:30px;height:30px;margin-bottom:10px;color:#6f9ed8}.co-generation-state strong{color:#344960;font-size:14px}.co-generation-state p{max-width:290px;margin:5px 0 0;font-size:12px;line-height:1.7}.co-generation-state .co-btn{margin-top:14px}.co-generation-state.is-failed{background:#fffafa}.co-generation-state.is-failed>.co-icon{color:#d15a5a}.co-float-window.is-generating .co-map-head{border-bottom-color:#d9e8fb}.co-pair-bar .co-spinner{width:15px;height:15px;flex:none}.co-miniball.is-processing{animation:co-miniball-processing 1.1s ease-in-out infinite}.co-miniball.is-failed{border-color:#e5a9a9;color:#c13f3f;background:#fff8f8}@keyframes co-miniball-processing{50%{border-color:#056de8;box-shadow:0 0 0 5px rgba(5,109,232,.12),0 5px 14px rgba(31,52,80,.15)}}
 .co-ball-menu button:hover,.co-ball-menu button:focus-visible{outline:0;background:#fff0f0}
+
+/* Tree canvas: one-sentence nodes in a draggable, zoomable left-to-right graph.
+   统一为圆角卡牌：不可碰撞＝白卡，可碰撞＝蓝卡。节点上不出现任何文字标注。 */
+.co-floating-stack .co-map-scroll.is-tree{overflow:hidden;touch-action:none;cursor:grab;user-select:none;background-color:#f7f9fc;background-image:radial-gradient(#cbd6e5 1px,transparent 1px);background-size:18px 18px}
+.co-floating-stack .co-map-scroll.is-tree.is-panning{cursor:grabbing}
+.co-floating-stack .co-tree-network{margin:0;transform:translate(var(--pan-x,0),var(--pan-y,0)) scale(var(--map-zoom,1));transform-origin:0 0}
+.co-tree-network .co-network-lines{position:absolute;inset:0;overflow:visible;pointer-events:none}
+.co-tree-network .co-network-lines path{fill:none;stroke:#aebfd3;stroke-width:1.4;vector-effect:non-scaling-stroke}
+.co-tree-network .co-graph-node{position:absolute;width:var(--node-w);height:var(--node-h);padding:9px 12px;display:flex;align-items:center;border:1px dashed #c3cedc;border-radius:10px;background:#f6f8fb;box-shadow:none;cursor:pointer;overflow:hidden}
+.co-tree-network .co-graph-node:hover{z-index:2;border-color:#9db4cc;background:#f0f4f9}
+.co-tree-network .co-graph-node.is-root{border-style:solid;border-color:#9cc0ea;border-left-width:3px;background:#eef5fd}
+.co-tree-network .co-graph-node.is-branch{border-style:dashed;border-color:#c8d2de;background:#f7f9fc}
+/* 可碰撞：实线胶囊 + 蓝色描边 + 白底 + 抓取光标 + 左侧圆点。 */
+.co-tree-network .co-graph-node.is-collision{border-style:solid;border-width:1.5px;border-color:#5f9be2;border-radius:999px;background:#fff;box-shadow:0 2px 8px rgba(31,82,145,.12);cursor:grab}
+.co-tree-network .co-graph-node.is-collision:hover{border-color:#056de8;background:#f7fbff;box-shadow:0 4px 14px rgba(31,82,145,.18)}
+.co-tree-network .co-graph-node.is-collision:active{cursor:grabbing}
+.co-tree-network .co-graph-node.is-collision:before{content:"";position:absolute;left:9px;top:50%;width:7px;height:7px;margin-top:-3.5px;border-radius:50%;background:#056de8}
+.co-tree-network .co-graph-node.selected{border-color:#056de8;background:#e5f1ff;box-shadow:0 0 0 3px rgba(5,109,232,.16)}
+.co-tree-network .co-graph-node.drop-invalid{border-color:#e08a8a;border-style:solid;background:#fff5f5;box-shadow:0 0 0 2px rgba(209,90,90,.16)}
+.co-tree-network .co-node-main{display:-webkit-box;width:100%;padding:0 4px 0 10px;border:0;background:transparent;color:#55667c;font:500 11.5px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;text-align:left;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;cursor:inherit}
+.co-tree-network .co-graph-node.is-root .co-node-main{color:#193f70;font-weight:600}
+.co-tree-network .co-graph-node.is-collision .co-node-main{padding-left:13px;color:#22364d;font-weight:500}
+.co-tree-network .co-graph-source{position:absolute;right:11px;bottom:3px;padding:0;border:0;background:transparent;color:#6d8fb7;font-size:8px;line-height:12px;opacity:0;transition:opacity .15s}
+.co-tree-network .co-graph-node:hover .co-graph-source,.co-tree-network .co-graph-source:focus-visible{opacity:1}
+@media(max-width:560px){.co-tree-network .co-graph-node.is-collision{border-radius:24px}}
+
+/* ==========================================================================
+   卡牌化观点节点：所有节点统一圆角边框卡片。
+   · 不可碰撞（总观点 / 结构分支）＝白卡，可查看详情但不能拖拽；
+   · 可碰撞（末层观点）＝蓝卡，悬停像被提起、拖拽像被拿在手里、
+     靠近另一张可碰撞卡时持续充能，松手后合成新卡并飞向左侧产物栏。
+   ========================================================================== */
+.co-tree-network .co-graph-node{
+  border:1px solid #e3e8ef;border-radius:14px;background:#fff;
+  box-shadow:0 1px 2px rgba(23,43,77,.05);cursor:pointer;
+  transition:transform .22s cubic-bezier(.2,.85,.3,1),box-shadow .22s ease,border-color .18s ease,background-color .18s ease,opacity .18s ease;
+}
+.co-tree-network .co-graph-node.is-root,
+.co-tree-network .co-graph-node.is-branch{border-style:solid;border-width:1px;border-color:#e3e8ef;background:#fff}
+.co-tree-network .co-graph-node.is-root{border-left-width:3px;border-left-color:#c4d7ef}
+/* 白色结构卡也可打开详情，用克制的悬停反馈与蓝色碰撞卡区分。 */
+.co-tree-network .co-graph-node.is-root:hover,
+.co-tree-network .co-graph-node.is-branch:hover{transform:translateY(-2px);border-color:#c8d5e4;background:#fbfcfe;box-shadow:0 5px 12px rgba(23,43,77,.08)}
+.co-tree-network .co-graph-node.is-root .co-node-main{color:#1d3c66;font-weight:600}
+.co-tree-network .co-graph-node.is-branch .co-node-main{color:#5b6b80}
+/* 可碰撞卡：蓝色描边 + 蓝色底光 + 抓取光标。 */
+.co-tree-network .co-graph-node.is-collision{
+  border:1.5px solid #79aeee;border-radius:14px;
+  background:linear-gradient(180deg,#fff 0%,#f2f8ff 100%);
+  box-shadow:0 2px 6px rgba(19,72,140,.1);cursor:grab;touch-action:none;
+}
+.co-tree-network .co-graph-node.is-collision:before{background:#0a6ee0}
+.co-tree-network .co-graph-node.is-collision .co-node-main{color:#20364f;font-weight:500}
+.co-tree-network .co-graph-node.is-collision:hover{
+  z-index:5;border-color:#056de8;
+  background:linear-gradient(180deg,#fff 0%,#eaf3ff 100%);
+  transform:translateY(-8px) scale(1.04) rotate(-.6deg);
+  box-shadow:0 16px 28px rgba(19,72,140,.22),0 2px 6px rgba(19,72,140,.14);
+}
+.co-tree-network .co-graph-node.is-collision:active{cursor:grabbing}
+.co-tree-network .co-graph-node.is-collision.is-dragging-source{opacity:.28;transform:scale(.96);box-shadow:none;cursor:grabbing}
+.co-tree-network .co-graph-node.is-collision.is-dragging-source:hover{transform:scale(.96)}
+
+/* 节点详情：可碰撞观点展开解释和原文；结构节点只展开原文。 */
+.co-node-detail-statement{padding:19px 21px;border:1px solid #dce8f6;border-radius:10px;background:linear-gradient(145deg,#f7fbff,#fff)}
+.co-node-detail-statement h3,.co-node-detail-evidence h3{margin:0 0 9px;color:#60738c;font-size:13px}
+.co-node-detail-statement p{margin:0;color:#173d69;font-size:18px;font-weight:600;line-height:1.8}
+/* 观点解释是 1～2 段说明文字，不是单句判断：字号更小、常规字重、段间留白。 */
+.co-node-detail-statement.is-explanation p{color:#3c5568;font-size:15px;font-weight:400;line-height:1.95}
+.co-node-detail-statement.is-explanation p+p{margin-top:10px}
+.co-node-detail-evidence{margin-top:22px}.co-dialog-body>.co-node-detail-evidence:first-child{margin-top:0}.co-node-detail-evidence blockquote{position:relative;margin:10px 0;padding:14px 15px 13px 45px;border:1px solid #e2e9f2;border-radius:8px;background:#fbfcfe}
+.co-node-detail-evidence-index{position:absolute;left:14px;top:15px;width:20px;height:20px;display:grid;place-items:center;border-radius:50%;background:#e7f1ff;color:#1769c2;font-size:11px;font-weight:700}
+.co-node-detail-evidence blockquote p{margin:0 0 7px;color:#41556e;font-size:14px;line-height:1.85}
+.co-node-detail-evidence blockquote .co-link{font-size:12px}
+
+/* 碰撞结果详情：作者来源放在页首，AI 分析是主体，深入问题紧随其后。 */
+.co-collision-analysis{padding:21px 23px;border:1px solid #d9e7f8;border-left:4px solid #5799ea;border-radius:8px;background:#f5f9ff}
+.co-collision-analysis>span,.co-collision-question>span{display:block;margin-bottom:9px;color:#4f6f96;font-size:12px;font-weight:700;letter-spacing:.04em}
+.co-collision-analysis p{margin:0;color:#314b69;font-size:16px;line-height:2;white-space:pre-wrap}
+.co-collision-analysis p+p{margin-top:13px}
+.co-collision-question{margin-top:24px;padding:0 2px}
+.co-collision-question h3{margin:0;color:#171f2b;font-size:24px;line-height:1.65;text-wrap:balance}
+/* 问题详情说明：讲清这个问题落在谁身上、为什么两篇回答都答不了它。
+   排版上比问题标题弱、比正文强，用左侧竖线与标题区分开。 */
+.co-question-detail{margin-top:14px;padding-left:13px;border-left:2px solid #dbe5f1}
+.co-question-detail p{margin:0;color:#465c78;font-size:15px;line-height:1.95}
+.co-question-detail p+p{margin-top:10px}
+@media(max-width:700px){.co-node-detail-statement p{font-size:16px}.co-collision-analysis{padding:17px}.co-collision-analysis p{font-size:15px}.co-collision-question h3{font-size:21px}.co-question-detail p{font-size:14px}}
+/* 拖拽靠近可碰撞目标：只要没松手就一直微微充能。 */
+.co-tree-network .co-graph-node.is-collision.is-charging{
+  z-index:4;border-color:#056de8;background:linear-gradient(180deg,#eaf4ff 0%,#d9e9ff 100%);
+  animation:co-card-charge 1.05s ease-in-out infinite;
+}
+@keyframes co-card-charge{
+  0%,100%{transform:translateY(-3px) scale(1.015);box-shadow:0 0 0 2px rgba(5,109,232,.22),0 10px 20px rgba(19,72,140,.16)}
+  50%{transform:translateY(-6px) scale(1.05);box-shadow:0 0 0 9px rgba(5,109,232,.07),0 16px 28px rgba(19,72,140,.24)}
+}
+.co-tree-network .co-graph-node.is-merging{animation:co-card-absorb .27s ease-in forwards}
+@keyframes co-card-absorb{to{transform:scale(.82);opacity:0}}
+body.co-card-dragging{cursor:grabbing;user-select:none}
+body.co-card-dragging .co-tree-network .co-graph-node:hover{transform:none}
+body.co-card-dragging .co-tree-network .co-graph-node.is-charging:hover{transform:translateY(-4px) scale(1.03)}
+
+/* 被“拿起来”的那张卡：跟随指针、带倾斜与投影。 */
+.co-drag-card{
+  position:fixed;left:0;top:0;z-index:3000;display:flex;align-items:center;
+  padding:9px 12px;border:1.5px solid #056de8;border-radius:14px;
+  background:linear-gradient(180deg,#fff 0%,#eaf3ff 100%);color:#21354c;
+  font:500 11px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  box-shadow:0 26px 46px rgba(11,38,77,.32),0 3px 10px rgba(11,38,77,.18);
+  pointer-events:none;transform-origin:50% 50%;
+  transform:translate(-50%,-50%) rotate(var(--tilt,-4deg)) scale(1.08);
+  animation:co-card-lift .18s cubic-bezier(.2,.85,.3,1);
+}
+.co-drag-card span{display:-webkit-box;width:100%;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:3}
+@keyframes co-card-lift{from{transform:translate(-50%,-50%) rotate(0) scale(1);box-shadow:0 2px 6px rgba(19,72,140,.1)}}
+.co-drag-card.is-locked{border-color:#0a58c2;animation:co-card-hum .9s ease-in-out infinite}
+@keyframes co-card-hum{
+  0%,100%{transform:translate(-50%,-50%) rotate(var(--tilt,-4deg)) scale(1.08);box-shadow:0 0 0 5px rgba(5,109,232,.13),0 26px 46px rgba(11,38,77,.32)}
+  50%{transform:translate(-50%,-50%) rotate(calc(var(--tilt,-4deg) * .35)) scale(1.13);box-shadow:0 0 0 12px rgba(5,109,232,.05),0 30px 52px rgba(11,38,77,.34)}
+}
+.co-drag-card.is-returning{transition:left .24s ease,top .24s ease,opacity .24s ease;opacity:0;animation:none}
+
+/* 合成瞬间的闪光与飞向左栏的新卡。 */
+.co-merge-flash{position:fixed;z-index:2990;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;pointer-events:none;
+  background:radial-gradient(circle,#fff 0%,#8ec5ff 42%,rgba(5,109,232,0) 72%);animation:co-merge-flash .55s ease-out forwards}
+@keyframes co-merge-flash{0%{transform:scale(.4);opacity:0}30%{opacity:1}100%{transform:scale(8);opacity:0}}
+.co-fly-card{position:fixed;z-index:3000;display:flex;align-items:center;justify-content:center;
+  border:1.5px solid #056de8;border-radius:14px;background:linear-gradient(180deg,#fff 0%,#e8f2ff 100%);
+  box-shadow:0 22px 40px rgba(11,38,77,.3);color:#17406f;pointer-events:none;
+  font:600 11px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  transform:translate(-50%,-50%);
+  transition:left .62s cubic-bezier(.32,.9,.28,1),top .62s cubic-bezier(.32,.9,.28,1),width .62s ease,height .62s ease}
+.co-fly-card.is-born{animation:co-card-born .3s cubic-bezier(.2,1.5,.4,1)}
+@keyframes co-card-born{0%{transform:translate(-50%,-50%) scale(.2);opacity:0}60%{opacity:1}100%{transform:translate(-50%,-50%) scale(1)}}
+
+/* 左侧产物栏：合成后的新卡牌落位处。加载中 / 已生成好 / 判定失败三态。 */
+.co-result-rail{position:fixed;z-index:1000;left:max(14px,calc((100vw - 1220px)/2 - 236px));top:120px;width:224px;display:flex;flex-direction:column;gap:9px;max-height:calc(100vh - 170px);overflow:auto;padding:2px}
+.co-result-rail-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding:0 3px}
+/* 左侧空间不足以容纳整条栏时收起为侧边抽屉，避免压住正文首字。 */
+@media(max-width:1700px){
+  .co-result-rail{left:0;top:104px;width:auto;max-width:210px;padding:8px 10px 10px 8px;border:1px solid #dfe6ef;border-left:0;border-radius:0 14px 14px 0;background:rgba(252,253,255,.97);box-shadow:6px 10px 26px rgba(23,43,77,.12);backdrop-filter:blur(8px);transform:translateX(calc(-100% + 26px));transition:transform .26s cubic-bezier(.2,.85,.3,1)}
+  .co-result-rail:hover,.co-result-rail:focus-within,.co-result-rail.is-peeking{transform:translateX(0)}
+  .co-result-rail:hover:after,.co-result-rail:focus-within:after,.co-result-rail.is-peeking:after{opacity:0}
+  .co-result-rail:after{content:"新节点";position:absolute;right:-1px;top:0;bottom:0;width:26px;display:grid;place-items:center;border-radius:0 13px 13px 0;background:#eaf3ff;color:#2f6fc0;font-size:11px;font-weight:600;writing-mode:vertical-rl;letter-spacing:2px;pointer-events:none;transition:opacity .2s}
+  .co-result-rail:hover:after,.co-result-rail:focus-within:after{opacity:0}
+  .co-result-card{width:186px}
+}
+.co-result-rail-head strong{color:#24364c;font-size:12px}
+.co-result-rail-head span{color:#8590a6;font-size:10px}
+.co-result-card{position:relative;display:flex;flex-direction:column;gap:6px;width:100%;padding:11px 12px;border:1.5px solid #79aeee;border-radius:14px;background:linear-gradient(180deg,#fff 0%,#f2f8ff 100%);box-shadow:0 2px 8px rgba(19,72,140,.12);text-align:left;font:inherit;color:#21354c;cursor:default;transition:transform .2s cubic-bezier(.2,.85,.3,1),box-shadow .2s ease,border-color .18s ease}
+.co-result-card>b{overflow:hidden;display:-webkit-box;color:#1c3a5e;font:600 11.5px/1.55 inherit;-webkit-box-orient:vertical;-webkit-line-clamp:3}
+.co-result-card small{color:#7b8aa0;font-size:10px;line-height:1.5}
+.co-result-card .co-result-state{display:flex;align-items:center;gap:6px;color:#2f6fc0;font-size:10px}
+.co-result-card .co-spinner{width:12px;height:12px;border-width:2px}
+.co-result-card.is-ready{cursor:pointer}
+.co-result-card.is-ready:hover{transform:translateY(-5px) scale(1.03);border-color:#056de8;box-shadow:0 14px 26px rgba(19,72,140,.22)}
+.co-result-card.is-ready .co-result-state{color:#2b8669}
+.co-result-card.is-new:after{content:"";position:absolute;inset:-3px;border-radius:16px;border:2px solid rgba(5,109,232,.5);pointer-events:none;animation:co-result-ping 1.5s ease-out 2}
+@keyframes co-result-ping{0%{opacity:.8;transform:scale(1)}100%{opacity:0;transform:scale(1.1)}}
+.co-result-card.is-loading{border-color:#b6cfee;background:linear-gradient(180deg,#fff 0%,#f6faff 100%)}
+.co-result-card.is-failed{border-color:#d4d9e0;background:#f4f5f7;color:#8590a6;box-shadow:none}
+.co-result-card.is-failed>b{color:#7c8798;font-weight:500}
+.co-result-card.is-failed .co-result-state{color:#9aa3b2}
+.co-result-trash{position:absolute;top:7px;right:7px;width:24px;height:24px;display:grid;place-items:center;padding:0;border:1px solid #e0e4ea;border-radius:8px;background:#fff;color:#98a2b3;cursor:pointer;transition:color .15s,border-color .15s,background-color .15s}
+.co-result-trash:hover{border-color:#eab4b4;background:#fff3f3;color:#d24949}
+.co-result-trash .co-icon{width:13px;height:13px}
+.co-result-empty{padding:16px 12px;border:1px dashed #d6dde7;border-radius:12px;background:rgba(255,255,255,.72);color:#9aa3b2;font-size:10.5px;line-height:1.7;text-align:center}
+@media(max-width:1560px){.co-result-rail{top:104px}}
+@media(max-width:1180px){.co-result-card{padding:9px 10px}}
+@media(max-width:820px){.co-result-rail{position:fixed;left:0;top:auto;bottom:0;width:100%;max-width:none;max-height:44vh;padding:10px 12px;border:0;border-top:1px solid #dfe6ef;border-radius:14px 14px 0 0;box-shadow:0 -8px 26px rgba(23,43,77,.14);transform:translateY(calc(100% - 30px))}
+  .co-result-rail:hover,.co-result-rail:focus-within,.co-result-rail.is-peeking{transform:translateY(0)}
+  .co-result-rail:after{content:"新节点";right:0;left:0;top:0;bottom:auto;width:auto;height:26px;border-radius:14px 14px 0 0;writing-mode:horizontal-tb;letter-spacing:1px}
+  .co-result-card{width:100%}}
+
+/* 首次发现的惊喜特效：卡片撑开 → 光晕 → 弹窗带流光。 */
+.co-first-burst{position:fixed;z-index:3100;pointer-events:none;transform:translate(-50%,-50%)}
+.co-first-burst i{position:absolute;left:0;top:0;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:#056de8;opacity:0;animation:co-spark-fly .95s cubic-bezier(.2,.8,.3,1) forwards}
+.co-first-burst i:nth-child(even){width:6px;height:6px;background:#f5b64a}
+.co-first-burst:before{content:"";position:absolute;left:0;top:0;width:40px;height:40px;margin:-20px 0 0 -20px;border-radius:50%;background:radial-gradient(circle,#fff 0%,#9fcbff 45%,rgba(5,109,232,0) 70%);animation:co-merge-flash .8s ease-out forwards}
+@keyframes co-spark-fly{0%{opacity:1;transform:translate(0,0) scale(1)}100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.35)}}
+.co-dialog.is-first-find{animation:co-dialog-pop .42s cubic-bezier(.2,1.3,.35,1)}
+@keyframes co-dialog-pop{0%{transform:scale(.9);opacity:.2}100%{transform:scale(1);opacity:1}}
+.co-first-ribbon{display:flex;align-items:center;gap:8px;margin-bottom:14px;padding:10px 14px;border-radius:10px;background:linear-gradient(100deg,#e9f2ff,#fdf3e0,#e9f2ff);background-size:220% 100%;color:#1d4e89;font-size:13px;font-weight:600;animation:co-ribbon-shine 2.4s linear infinite}
+.co-first-ribbon .co-icon{width:17px;height:17px;color:#f0a63c}
+@keyframes co-ribbon-shine{to{background-position:220% 0}}
+@media(prefers-reduced-motion:reduce){
+  .co-tree-network .co-graph-node,.co-result-card,.co-drag-card,.co-fly-card{transition:none;animation:none}
+  .co-tree-network .co-graph-node.is-collision:hover{transform:none}
+  .co-first-burst,.co-merge-flash,.co-first-ribbon{animation:none}
+
+}
+
+/* 延申问题：统一命名、来源行与限高滚动列表（约 3.5 条可见）。 */
+.co-section-hint{margin:6px 0 0;color:#8590a6;font-size:12px;line-height:1.7}
+.co-discovery-scroll{max-height:266px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#c6d3e4 transparent}
+.co-discovery-scroll::-webkit-scrollbar{width:7px}
+.co-discovery-scroll::-webkit-scrollbar-thumb{background:#ccd8e8;border-radius:4px}
+.co-discovery-scroll::-webkit-scrollbar-thumb:hover{background:#a9bdd6}
+.co-discovery-scroll::-webkit-scrollbar-track{background:transparent}
+.co-discovery-scroll>.co-discovery-summary+.co-discovery-summary{border-top:1px solid #e7edf5}
+.co-discovery-title{display:block;font-size:14px;line-height:1.6;font-weight:600;color:#24364c;text-decoration:none}
+.co-discovery-title:hover{color:#056de8}
+.co-discovery-meta{display:block;margin-top:4px;color:#7f8ba0;font-size:11px;line-height:1.6;font-weight:400}
+.co-discovery-meta span{margin-right:12px}
+.co-discovery-meta i{font-style:normal}
+.co-author-link{border:0;background:none;padding:0;font:inherit;font-size:11px;color:#175199;cursor:pointer}
+.co-author-link:hover{color:#056de8;text-decoration:underline}
+.co-discovery-act{border:0;background:none;padding:0;font:inherit;font-size:12px;font-weight:500;color:#58718f;cursor:pointer;text-decoration:none;white-space:nowrap}
+.co-discovery-act:hover{color:#056de8}
+.co-discovery-jump{cursor:default}
+.co-discovery-jump:hover{background:#f7faff}
+.co-feed-question{cursor:default}
+.co-feed-question .co-discovery-go{display:inline-block;margin-top:5px;font-size:11px;color:#175199;text-decoration:none}
+.co-feed-question .co-discovery-go:hover{color:#056de8;text-decoration:underline}

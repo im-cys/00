@@ -1,15 +1,26 @@
 $ErrorActionPreference = 'Stop'
 $projectDir = Split-Path -Parent $PSScriptRoot
-$expectedEntry = [IO.Path]::GetFullPath((Join-Path $projectDir 'server\server.mjs'))
-$listeners = @(Get-NetTCPConnection -LocalPort 3210 -State Listen -ErrorAction SilentlyContinue)
-if (-not $listeners.Count) { Write-Host 'Service is not running.'; exit 0 }
-foreach ($listener in $listeners) {
-    $taskProcess = Get-CimInstance Win32_Process -Filter ('ProcessId = ' + $listener.OwningProcess)
-    $normalizedCommand = ($taskProcess.CommandLine -replace '/', '\')
-    if ($taskProcess.Name -ne 'node.exe' -or -not $normalizedCommand.Contains($expectedEntry)) {
-        throw 'Port 3210 belongs to a process whose path cannot be verified. No process was stopped.'
+
+function Stop-VerifiedService([int]$Port, [string]$ExpectedEntry) {
+    $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+    if (-not $listeners.Count) { return 0 }
+    $expected = [IO.Path]::GetFullPath((Join-Path $projectDir $ExpectedEntry)).Replace('/', '\')
+    $stopped = 0
+    foreach ($listener in $listeners) {
+        $taskProcess = Get-CimInstance Win32_Process -Filter ('ProcessId = ' + $listener.OwningProcess)
+        $commandLine = [string]$taskProcess.CommandLine
+        $commandLine = $commandLine.Replace('/', '\')
+        if ($commandLine.IndexOf($expected, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            throw "Port $Port belongs to a process outside this project. Nothing was stopped."
+        }
+        Stop-Process -Id $listener.OwningProcess -Force
+        $stopped++
     }
-    & (Join-Path $env:SystemRoot 'System32\taskkill.exe') /PID $listener.OwningProcess /F | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw ('Unable to stop service process ' + $listener.OwningProcess) }
+    return $stopped
 }
-Write-Host 'Mock site service stopped.'
+
+$count = 0
+$count += Stop-VerifiedService 3210 'server\server.mjs'
+$count += Stop-VerifiedService 3311 'extractor\collide_service.py'
+if ($count) { Write-Host "Stopped $count local development service(s)." }
+else { Write-Host 'Local development services are not running.' }

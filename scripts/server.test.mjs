@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer as createHttpServer } from 'node:http';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createCommunityStore } from '../server/community-store.mjs';
-import { createServer } from '../server/server.mjs';
+import { createServer, publicMapError } from '../server/server.mjs';
 import { configuration } from '../server/config.mjs';
 
 test('优先识别知乎黑客松标准回调变量名', async () => {
@@ -44,6 +44,11 @@ test('文件回退存储可持久化 OAuth、私有数据、结构图、发现�
     const user = { id: 'zhihu-test', name: '测试用户', avatar: '', provider: 'zhihu' };
     const token = await store.createSession(user);
     assert.equal((await store.session(token)).id, user.id);
+    const testUser = await store.registerTestUser('测试用户一', 'password-123');
+    assert.equal(testUser.provider, 'test-password');
+    assert.equal((await store.authenticateTestUser('测试用户一', 'password-123')).id, testUser.id);
+    await assert.rejects(store.authenticateTestUser('测试用户一', 'wrong-password'), /用户名或密码/);
+    await assert.rejects(store.registerTestUser('测试用户一', 'password-123'), /已存在/);
     await store.saveOAuthState('state', 'nonce', '/question/10001');
     assert.deepEqual(await store.consumeOAuthState('state', 'nonce'), { returnTo: '/question/10001' });
     assert.equal(await store.consumeOAuthState('state', 'nonce'), null, 'state 必须只能消费一次');
@@ -51,6 +56,12 @@ test('文件回退存储可持久化 OAuth、私有数据、结构图、发现�
     assert.equal((await store.getDataset()).contentHash, 'hash');
     await store.saveAnswerMap({ answerId: '10001-01', questionId: '10001', payload: { nodes: [] }, sourceHash: 's', model: 'deepseek-v4-pro', promptVersion: 'v1' });
     assert.deepEqual((await store.getAnswerMap('10001-01')).payload, { nodes: [] });
+    await store.saveAnswerMap({ answerId: '10001-02', questionId: '10001', payload: { schemaVersion: 'answer-tree-v2', tree: {}, nodes: [] }, sourceHash: 's2', model: 'deepseek-v4-pro', promptVersion: 'answer-tree-v2' });
+    assert.equal(await store.pruneAnswerMaps('answer-tree-v2'), 1);
+    assert.equal(await store.getAnswerMap('10001-01'), null);
+    assert.ok(await store.getAnswerMap('10001-02'));
+    assert.equal(await store.pruneAnswerMaps('answer-tree-v2', 'answer-tree-v2.1-density'), 1);
+    assert.equal(await store.getAnswerMap('10001-02'), null);
     const discovery = await store.saveDiscovery(user, { id: 'd1', pairKey: 'pair', questionId: '10001', status: 'published' });
     const comment = await store.commentDiscovery(user, discovery.id, '公开评论');
     const publicData = await store.listDiscoveries('10001');
@@ -86,7 +97,7 @@ test('知乎授权跳转使用官方 app_id 参数并把 state 绑定到浏览�
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
 
-test('未登录访问页面时先跳转知乎授权，登录用户可直接进入', async () => {
+test('未登录访问页面时先进入登录选择页，登录用户可直接进入', async () => {
   let loggedIn = false;
   const store = { session: async () => loggedIn ? { id: 'zhihu-test', name: '测试用户' } : null };
   const config = {
@@ -99,13 +110,73 @@ test('未登录访问页面时先跳转知乎授权，登录用户可直接进�
     const { port } = server.address(); const base = `http://127.0.0.1:${port}`;
     const guarded = await fetch(`${base}/question/10001?from=home`, { redirect: 'manual' });
     assert.equal(guarded.status, 302);
-    assert.equal(guarded.headers.get('location'), '/auth/zhihu?return_to=%2Fquestion%2F10001%3Ffrom%3Dhome');
+    assert.equal(guarded.headers.get('location'), '/login?return_to=%2Fquestion%2F10001%3Ffrom%3Dhome');
+    const loginPage = await fetch(`${base}${guarded.headers.get('location')}`);
+    assert.equal(loginPage.status, 200);
+    assert.match(await loginPage.text(), /创建账号并登录/);
     const asset = await fetch(`${base}/web/styles.css`, { redirect: 'manual' });
     assert.equal(asset.status, 200, '静态资源不能被登录守卫拦截');
     loggedIn = true;
     const allowed = await fetch(`${base}/question/10001?from=home`, { headers: { Cookie: 'qm_session=test' }, redirect: 'manual' });
     assert.equal(allowed.status, 200);
   } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test('临时账号可创建、登录、切换两个账号，互动状态按用户隔离并持久化', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'answer-collision-auth-'));
+  const file = join(dir, 'store.json');
+  const store = createCommunityStore(file);
+  const config = {
+    allowedHosts: ['127.0.0.1'], allowedOrigins: [], collideBase: 'http://127.0.0.1:3311', useDatabase: false, aiModel: 'deepseek-v4-pro', testPasswordAuthEnabled: true,
+    zhihuAuth: { configured: true, demoMode: false, redirectUri: 'http://127.0.0.1/auth/zhihu/callback' }
+  };
+  const server = createServer(config, store);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const auth = async (action, username) => {
+      const response = await fetch(`${base}/api/auth/test/${action}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password: 'password-123', returnTo: '/question/10001' })
+      });
+      assert.equal(response.status, 200, JSON.stringify(await response.clone().json()));
+      return response.headers.get('set-cookie').split(';')[0];
+    };
+    const aliceCookie = await auth('register', '测试账号A');
+    const bobCookie = await auth('register', '测试账号B');
+    const persistedCredentials = await readFile(file, 'utf8');
+    assert.doesNotMatch(persistedCredentials, /password-123/, '存储文件不得出现明文密码');
+    assert.match(persistedCredentials, /passwordHash/);
+    const actionBody = { action: 'like', questionId: '10001', answerId: '10001-01' };
+    const aliceLike = await fetch(`${base}/api/community/action`, { method: 'POST', headers: { Cookie: aliceCookie, 'Content-Type': 'application/json' }, body: JSON.stringify(actionBody) });
+    assert.equal(aliceLike.status, 200);
+    assert.equal((await aliceLike.json()).answers['10001-01'].mine.like, true);
+    const bobSnapshot = await (await fetch(`${base}/api/community`, { headers: { Cookie: bobCookie } })).json();
+    assert.equal(bobSnapshot.answers['10001-01'].likes, 1);
+    assert.equal(bobSnapshot.answers['10001-01'].mine.like, false, '总数共享，但不能把 A 的点赞记到 B 名下');
+    const bobLike = await fetch(`${base}/api/community/action`, { method: 'POST', headers: { Cookie: bobCookie, 'Content-Type': 'application/json' }, body: JSON.stringify(actionBody) });
+    assert.equal((await bobLike.json()).answers['10001-01'].likes, 2);
+    const discoveryPayload = { id: 'multi-account-discovery', pairKey: '10001|multi-account-pair', questionId: '10001', refs: [], newQuestion: '多账号能否看到同一条发现？', status: 'published' };
+    const published = await fetch(`${base}/api/discoveries`, { method: 'POST', headers: { Cookie: aliceCookie, 'Content-Type': 'application/json' }, body: JSON.stringify(discoveryPayload) });
+    assert.equal(published.status, 200);
+    assert.equal((await published.json()).item.author, '测试账号A');
+    const commented = await fetch(`${base}/api/discoveries/comment`, { method: 'POST', headers: { Cookie: bobCookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ discoveryId: discoveryPayload.id, text: 'B 账号的公开评论' }) });
+    assert.equal(commented.status, 200);
+    assert.equal((await commented.json()).item.author, '测试账号B');
+    const answerComment = await fetch(`${base}/api/community/comment`, { method: 'POST', headers: { Cookie: bobCookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ questionId: '10001', answerId: '10001-01', text: 'B 账号的回答评论' }) });
+    assert.equal(answerComment.status, 200);
+    const publicDiscoveries = await (await fetch(`${base}/api/discoveries?questionId=10001`)).json();
+    assert.equal(publicDiscoveries.items[0].creatorId.startsWith('test-'), true);
+    assert.equal(publicDiscoveries.comments[discoveryPayload.id][0].author, '测试账号B');
+    const restartedStore = createCommunityStore(file);
+    const aliceAgain = await restartedStore.authenticateTestUser('测试账号A', 'password-123');
+    assert.equal((await restartedStore.snapshot(aliceAgain.id)).answers['10001-01'].mine.like, true);
+    assert.equal((await restartedStore.snapshot(aliceAgain.id)).answers['10001-01'].comments, 1);
+    assert.equal((await restartedStore.listDiscoveries('10001')).comments[discoveryPayload.id][0].author, '测试账号B');
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('受保护导入接口写入存储后，网页内容脚本从存储读取', async () => {
@@ -199,4 +270,58 @@ test('结构图生成立即返回任务状态，并可轮询到实际生成结�
     await new Promise(resolve => server.close(resolve));
     await new Promise(resolve => upstream.close(resolve));
   }
+});
+
+test('结构图列表只返回 answer-tree-v2，旧扁平缓存不会混入前端', async () => {
+  const store = {
+    getAnswerMaps: async () => ({
+      '10001-01': { answerId: '10001-01', nodes: [{ id: 'old' }] },
+      '10001-02': { schemaVersion: 'answer-tree-v2', answerId: '10001-02', tree: { id: 'root' }, nodes: [] }
+    })
+  };
+  const config = {
+    allowedHosts: ['127.0.0.1'], allowedOrigins: [], collideBase: 'http://127.0.0.1:3311', useDatabase: false, aiModel: 'deepseek-v4-pro',
+    zhihuAuth: { configured: false, demoMode: false, redirectUri: 'http://127.0.0.1/callback' }
+  };
+  const server = createServer(config, store);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/collide/maps?qid=10001`);
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.deepEqual(Object.keys(result.answers), ['10001-02']);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test('本地操作轨迹只记录定位字段，不写回答正文和密钥', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'answer-collision-trace-'));
+  const operationLogPath = join(dir, 'operation-trace.jsonl');
+  const store = {};
+  const config = {
+    allowedHosts: ['127.0.0.1'], allowedOrigins: [], useDatabase: false, operationLogPath,
+    aiModel: 'test-model', zhihuAuth: { configured: false, demoMode: true, redirectUri: 'http://127.0.0.1/callback' }
+  };
+  const server = createServer(config, store);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/local/trace`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'answer_selected', traceId: 'trace-1', questionId: '10006', answerId: '10006-02', selectedCount: 1, content: '不得写入的回答正文', apiKey: '不得写入的密钥' })
+    });
+    assert.equal(response.status, 200);
+    const log = await readFile(operationLogPath, 'utf8');
+    assert.match(log, /answer_selected/);
+    assert.match(log, /10006-02/);
+    assert.doesNotMatch(log, /回答正文|密钥/);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('生成失败会区分模型网络、限流和观点树校验错误', () => {
+  assert.match(publicMapError(new Error('WinError 10013')), /无法连接模型接口/);
+  assert.match(publicMapError(new Error('HTTP 429 rate limit')), /拥塞或额度/);
+  assert.match(publicMapError(new Error('观点树校验失败')), /没有通过新版观点树校验/);
+  assert.match(publicMapError(new DOMException('The operation was aborted due to timeout', 'TimeoutError')), /超过 15 分钟/);
 });

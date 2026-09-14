@@ -8,5 +8,6 @@ __pycache__/
 *.py[cod]
 *.zip
 *.log
+extractor/fixtures/*.json
 .box-agent/
 .box-agent-scratch/

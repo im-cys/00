@@ -1,9 +1,10 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { root } from './config.mjs';
+import { createPasswordRecord, testUserId, validateTestCredentials, verifyPassword } from './test-auth.mjs';
 
-const emptyDatabase = () => ({ version: 2, sessions: {}, oauthStates: {}, answers: {}, dataset: null, maps: {}, collisionCache: {}, discoveries: {}, discoveryComments: {} });
+const emptyDatabase = () => ({ version: 3, sessions: {}, oauthStates: {}, testAccounts: {}, answers: {}, dataset: null, maps: {}, collisionCache: {}, discoveries: {}, discoveryComments: {} });
 const toggleActions = new Set(['upvote', 'like', 'favorite']);
 
 export function createCommunityStore(filePath = resolve(root, 'runtime', 'community.json')) {
@@ -12,7 +13,7 @@ export function createCommunityStore(filePath = resolve(root, 'runtime', 'commun
   async function read() {
     try {
       const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-      return { ...emptyDatabase(), ...parsed, sessions: parsed.sessions || {}, oauthStates: parsed.oauthStates || {}, answers: parsed.answers || {}, maps: parsed.maps || {}, collisionCache: parsed.collisionCache || {}, discoveries: parsed.discoveries || {}, discoveryComments: parsed.discoveryComments || {} };
+      return { ...emptyDatabase(), ...parsed, sessions: parsed.sessions || {}, oauthStates: parsed.oauthStates || {}, testAccounts: parsed.testAccounts || {}, answers: parsed.answers || {}, maps: parsed.maps || {}, collisionCache: parsed.collisionCache || {}, discoveries: parsed.discoveries || {}, discoveryComments: parsed.discoveryComments || {} };
     } catch (error) {
       if (error.code === 'ENOENT') return emptyDatabase();
       throw error;
@@ -21,7 +22,9 @@ export function createCommunityStore(filePath = resolve(root, 'runtime', 'commun
 
   async function write(database) {
     await mkdir(dirname(filePath), { recursive: true });
-    await writeFile(filePath, JSON.stringify(database, null, 2), 'utf8');
+    const temporary = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+    await writeFile(temporary, JSON.stringify(database, null, 2), 'utf8');
+    await rename(temporary, filePath);
   }
 
   function mutate(operation) {
@@ -42,13 +45,15 @@ export function createCommunityStore(filePath = resolve(root, 'runtime', 'commun
   async function session(token) {
     if (!token) return null;
     const database = await read();
-    return database.sessions[token]?.user || null;
+    const item = database.sessions[token];
+    const expiresAt = item?.expiresAt || (Number(item?.createdAt) + 30 * 86400000);
+    return item?.user && expiresAt > Date.now() ? item.user : null;
   }
 
   async function createSession(user) {
     const token = randomUUID();
     await mutate(database => {
-      database.sessions[token] = { user, createdAt: Date.now() };
+      database.sessions[token] = { user, createdAt: Date.now(), expiresAt: Date.now() + 30 * 86400000 };
     });
     return token;
   }
@@ -56,6 +61,26 @@ export function createCommunityStore(filePath = resolve(root, 'runtime', 'commun
   async function deleteSession(token) {
     if (!token) return;
     await mutate(database => { delete database.sessions[token]; });
+  }
+
+  async function registerTestUser(username, password) {
+    const credentials = validateTestCredentials(username, password);
+    const passwordRecord = await createPasswordRecord(credentials.password);
+    return mutate(database => {
+      if (database.testAccounts[credentials.usernameKey]) throw Object.assign(new Error('该用户名已存在，请直接登录。'), { status: 409 });
+      const user = { id: testUserId(credentials.usernameKey), name: credentials.username, avatar: '', provider: 'test-password' };
+      database.testAccounts[credentials.usernameKey] = { ...passwordRecord, username: credentials.username, user, createdAt: Date.now() };
+      return user;
+    });
+  }
+
+  async function authenticateTestUser(username, password) {
+    const credentials = validateTestCredentials(username, password);
+    const account = (await read()).testAccounts[credentials.usernameKey];
+    if (!account || !await verifyPassword(credentials.password, account.salt, account.passwordHash)) {
+      throw Object.assign(new Error('用户名或密码不正确。'), { status: 401 });
+    }
+    return account.user;
   }
 
   async function saveOAuthState(state, browserNonce, returnTo) {
@@ -83,6 +108,20 @@ export function createCommunityStore(filePath = resolve(root, 'runtime', 'commun
   async function saveAnswerMap(item) {
     await mutate(database => { database.maps[item.answerId] = { ...item, updatedAt: Date.now() }; });
     return item.payload;
+  }
+  async function pruneAnswerMaps(schemaVersion, promptVersion = '') {
+    return mutate(database => {
+      let removed = 0;
+      for (const [answerId, item] of Object.entries(database.maps)) {
+        const actual = item?.payload?.schemaVersion || item?.payload?.schema_version || '';
+        const actualPrompt = item?.promptVersion || item?.prompt_version || '';
+        if (actual === schemaVersion && (!promptVersion || actualPrompt === promptVersion)) continue;
+        delete database.maps[answerId];
+        removed++;
+      }
+      if (removed) database.collisionCache = {};
+      return removed;
+    });
   }
   async function getCollisionCache(cacheKey) { return (await read()).collisionCache[cacheKey]?.result || null; }
   async function saveCollisionCache(item) { await mutate(database => { database.collisionCache[item.cacheKey] = { ...item, createdAt: Date.now() }; }); }
@@ -185,5 +224,5 @@ export function createCommunityStore(filePath = resolve(root, 'runtime', 'commun
     return snapshotFrom(await read(), userId);
   }
 
-  return { session, createSession, deleteSession, saveOAuthState, consumeOAuthState, getDataset, importDataset, getAnswerMaps, getAnswerMap, saveAnswerMap, getCollisionCache, saveCollisionCache, listDiscoveries, saveDiscovery, commentDiscovery, updateDiscoveryStatus, withdrawDiscoveryComment, act, comment, snapshot };
+  return { session, createSession, deleteSession, registerTestUser, authenticateTestUser, saveOAuthState, consumeOAuthState, getDataset, importDataset, getAnswerMaps, getAnswerMap, saveAnswerMap, pruneAnswerMaps, getCollisionCache, saveCollisionCache, listDiscoveries, saveDiscovery, commentDiscovery, updateDiscoveryStatus, withdrawDiscoveryComment, act, comment, snapshot };
 }
