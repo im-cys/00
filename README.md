@@ -32,6 +32,8 @@
 
 站点只支持知乎 OAuth 授权登录。服务端需要配置知乎开放平台的 AppID、AppKey、Access Secret 和回调地址，具体见 [`docs/CLOUDBASE_DEPLOY.md`](docs/CLOUDBASE_DEPLOY.md)。
 
+每位用户按北京时间自然日最多发起 10 次碰撞；点击开始后即计次，失败、无结果和缓存命中也计入。线上部署本版本前需再次执行可重复运行的 [`database/schema.sql`](database/schema.sql)，创建每日碰撞计数表。
+
 启动脚本只从当前新版项目的 `private-data/data.js` 导入回答数据，并可从 `private-data/.env` 读取本地模型配置，不再扫描或依赖同级旧代码目录。也可显式指定：
 
 ```powershell

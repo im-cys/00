@@ -16,6 +16,17 @@ create table if not exists public.app_sessions (
 );
 create index if not exists app_sessions_expires_idx on public.app_sessions(expires_at);
 
+-- 每个知乎用户每天最多发起 10 次碰撞。slot 的联合主键既记录失败尝试，
+-- 也能在多实例并发时从数据库层保证同一自然日不会超过 10 次。
+create table if not exists public.daily_collision_attempts (
+  user_id text not null references public.app_users(id) on delete cascade,
+  usage_date date not null,
+  slot smallint not null check (slot between 1 and 10),
+  created_at timestamptz not null default now(),
+  primary key (user_id, usage_date, slot)
+);
+create index if not exists daily_collision_attempts_date_idx on public.daily_collision_attempts(usage_date);
+
 create table if not exists public.oauth_states (
   state_hash text primary key,
   browser_nonce_hash text not null,

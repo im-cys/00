@@ -68,6 +68,8 @@ https://zhihu-social-demo-302050-11-1344805741.sh.run.tcloudbase.com/auth/zhihu/
 
 ## 4. 部署后导入私有数据
 
+每次部署包含数据库结构变更的版本前，先在 CloudBase SQL 控制台重新执行一次 [`database/schema.sql`](../database/schema.sql)。脚本可重复执行；本版本会新增 `daily_collision_attempts`，用于从服务端强制限制每位用户每天最多 10 次碰撞，失败尝试同样计数。
+
 在本机仓库根目录创建 `.env`，只写：
 
 ```dotenv

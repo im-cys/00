@@ -587,7 +587,10 @@
         body:JSON.stringify({questionId:wb.questionId,questionTitle:qById(wb.questionId)?.title||'',
           refs:refs.map(r=>({answerId:r.answerId,nodeId:r.nodeId}))})});
       data=await resp.json();
+      window.ZhihuDemoCommunity?.updateCollisionQuota?.(data.collisionQuota);
       if(resp.status===401){window.ZhihuDemoCommunity?.requireAccount?.();failResult(resultId,'需要先登录本站才能碰撞。');return;}
+      if(resp.status===429){failResult(resultId,data.reason||data.error||'今日碰撞次数已用完。','blocked');return;}
+      if(!resp.ok&&data.status!=='no_result'){data.status='blocked';data.reason=data.reason||data.error||'碰撞请求失败。';}
     }catch(err){
       data={status:'blocked',reason:'无法连接碰撞服务。请确认「启动碰撞服务.cmd」正在运行。'};
     }
@@ -1334,7 +1337,6 @@
   });
   document.querySelector('.search button')?.addEventListener('click',()=>showSearch(document.querySelector('.search input').value.trim()));
   document.querySelector('.search input')?.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();showSearch(event.target.value.trim());}});
-  document.querySelector('.zhida')?.addEventListener('click',()=>enterSelectMode());
   document.querySelectorAll('.main-nav a[href="#"]').forEach(link=>link.addEventListener('click',event=>{
     event.preventDefault();
     const label=link.textContent.trim();

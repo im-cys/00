@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { createCommunityStore } from '../server/community-store.mjs';
 import { createServer, publicMapError } from '../server/server.mjs';
 import { configuration } from '../server/config.mjs';
+import { chinaDayKey } from '../server/collision-quota.mjs';
 
 test('优先识别知乎黑客松标准回调变量名', async () => {
   const previous = process.env.ZHIHU_OAUTH_REDIRECT_URI;
@@ -74,6 +75,61 @@ test('文件回退存储可持久化 OAuth、私有数据、结构图、发现�
     await store.updateDiscoveryStatus(user, discovery.id, 'withdrawn');
     assert.equal((await store.listDiscoveries('10001')).items.length, 0);
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('每天最多十次碰撞，失败也计次并按北京时间自然日重置', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'answer-collision-quota-'));
+  try {
+    const store = createCommunityStore(join(dir, 'store.json'));
+    const user = { id: 'zhihu-quota-user', name: '额度测试用户', avatar: '', provider: 'zhihu' };
+    const beforeMidnight = Date.parse('2026-09-15T15:59:00.000Z');
+    assert.equal(chinaDayKey(beforeMidnight), '2026-09-15');
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      const quota = await store.consumeCollisionAttempt(user, beforeMidnight);
+      assert.equal(quota.allowed, true);
+      assert.equal(quota.used, attempt);
+      assert.equal(quota.remaining, 10 - attempt);
+    }
+    const exhausted = await store.consumeCollisionAttempt(user, beforeMidnight);
+    assert.equal(exhausted.allowed, false);
+    assert.equal(exhausted.used, 10);
+    const afterMidnight = beforeMidnight + 2 * 60 * 1000;
+    assert.equal(chinaDayKey(afterMidnight), '2026-09-16');
+    const reset = await store.consumeCollisionAttempt(user, afterMidnight);
+    assert.equal(reset.allowed, true);
+    assert.equal(reset.used, 1);
+    assert.equal(reset.remaining, 9);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('碰撞接口在处理失败前扣除次数，第十一次返回 429', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'answer-collision-quota-api-'));
+  const store = createCommunityStore(join(dir, 'store.json'));
+  const user = { id: 'zhihu-api-quota', name: '接口额度用户', avatar: '', provider: 'zhihu' };
+  const token = await store.createSession(user);
+  const config = {
+    allowedHosts: ['127.0.0.1'], allowedOrigins: [], collideBase: 'http://127.0.0.1:3311', useDatabase: false, aiModel: 'deepseek-v4-pro',
+    zhihuAuth: { configured: true, redirectUri: 'http://127.0.0.1/auth/zhihu/callback' }
+  };
+  const server = createServer(config, store);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const options = { method: 'POST', headers: { Cookie: `qm_session=${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ refs: [] }) };
+    for (let attempt = 1; attempt <= 10; attempt++) {
+      const response = await fetch(`${base}/api/collide`, options);
+      assert.equal(response.status, 400);
+      assert.equal((await response.json()).collisionQuota.used, attempt);
+    }
+    const limited = await fetch(`${base}/api/collide`, options);
+    assert.equal(limited.status, 429);
+    const body = await limited.json();
+    assert.equal(body.code, 'DAILY_COLLISION_LIMIT');
+    assert.equal(body.collisionQuota.remaining, 0);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('知乎授权跳转使用官方 app_id 参数并把 state 绑定到浏览器 nonce', async () => {

@@ -1,5 +1,6 @@
 import cloudbase from '@cloudbase/node-sdk';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { DAILY_COLLISION_LIMIT, chinaDayKey, collisionQuota } from './collision-quota.mjs';
 
 const hash = value => createHash('sha256').update(String(value)).digest('hex');
 const iso = value => new Date(value).toISOString();
@@ -56,6 +57,30 @@ export function createCloudbaseStore(config) {
 
   async function deleteSession(token) {
     if (token) rows(await db.from('app_sessions').delete().eq('token_hash', hash(token)));
+  }
+
+  async function getCollisionQuota(userId, now = Date.now()) {
+    if (!userId) return collisionQuota(0, now);
+    const found = rows(await db.from('daily_collision_attempts').select('slot').eq('user_id', userId).eq('usage_date', chinaDayKey(now)));
+    return collisionQuota(new Set(found.map(item => Number(item.slot))).size, now);
+  }
+
+  async function consumeCollisionAttempt(user, now = Date.now()) {
+    await ensureUser(user);
+    const usageDate = chinaDayKey(now);
+    for (let retry = 0; retry < DAILY_COLLISION_LIMIT + 1; retry++) {
+      const found = rows(await db.from('daily_collision_attempts').select('slot').eq('user_id', user.id).eq('usage_date', usageDate));
+      const occupied = new Set(found.map(item => Number(item.slot)));
+      if (occupied.size >= DAILY_COLLISION_LIMIT) return { allowed: false, ...collisionQuota(occupied.size, now) };
+      const slot = Array.from({ length: DAILY_COLLISION_LIMIT }, (_, index) => index + 1).find(value => !occupied.has(value));
+      try {
+        rows(await db.from('daily_collision_attempts').insert({ user_id: user.id, usage_date: usageDate, slot }));
+        return { allowed: true, ...collisionQuota(occupied.size + 1, now) };
+      } catch (error) {
+        if (!/duplicate|unique|already exists|23505/i.test(String(error?.message || error))) throw error;
+      }
+    }
+    return { allowed: false, ...await getCollisionQuota(user.id, now) };
   }
 
   async function saveOAuthState(state, browserNonce, returnTo) {
@@ -214,5 +239,5 @@ export function createCloudbaseStore(config) {
     return { answers, questions };
   }
 
-  return { session, createSession, deleteSession, saveOAuthState, consumeOAuthState, getDataset, importDataset, getAnswerMaps, getAnswerMap, saveAnswerMap, pruneAnswerMaps, getCollisionCache, saveCollisionCache, listDiscoveries, saveDiscovery, commentDiscovery, updateDiscoveryStatus, withdrawDiscoveryComment, act, comment, snapshot };
+  return { session, createSession, deleteSession, getCollisionQuota, consumeCollisionAttempt, saveOAuthState, consumeOAuthState, getDataset, importDataset, getAnswerMaps, getAnswerMap, saveAnswerMap, pruneAnswerMaps, getCollisionCache, saveCollisionCache, listDiscoveries, saveDiscovery, commentDiscovery, updateDiscoveryStatus, withdrawDiscoveryComment, act, comment, snapshot };
 }

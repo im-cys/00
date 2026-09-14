@@ -11,6 +11,7 @@
   const expandedAnswers = new Set();
   const openCommentPanels = new Set();
   const requestedComments = new URLSearchParams(location.search).get('comments');
+  const ONBOARDING_VERSION = 'collision-onboarding-v1';
   if (requestedComments) openCommentPanels.add(requestedComments);
   let community = { answers: {}, questions: {}, session: { user: null, configured: false } };
 
@@ -242,6 +243,55 @@
     button.textContent = user ? `${initials(user.name)} ${user.name}` : '知乎登录';
     button.classList.toggle('is-signed-in', Boolean(user));
     button.title = user ? '点击退出当前账号' : '使用知乎账号登录';
+    renderCollisionQuota();
+  }
+
+  function renderCollisionQuota() {
+    const badge = document.querySelector('#collisionQuota');
+    if (!badge) return;
+    const quota = community.collisionQuota || { limit: 10, used: 0, remaining: 10 };
+    const signedIn = Boolean(community.session.user);
+    badge.hidden = !signedIn;
+    badge.classList.toggle('is-low', signedIn && quota.remaining > 0 && quota.remaining <= 3);
+    badge.classList.toggle('is-empty', signedIn && quota.remaining === 0);
+    badge.innerHTML = `<span>今日碰撞</span><strong>${escape(quota.remaining)}/${escape(quota.limit)}</strong>`;
+    badge.title = `今天已使用 ${quota.used} 次；失败或无结果也计入，每天 0 点重置。`;
+  }
+
+  function onboardingKey(user) {
+    return `${ONBOARDING_VERSION}:${String(user?.id || '')}`;
+  }
+
+  function showOnboardingIfNeeded() {
+    const user = community.session.user;
+    if (!user || document.querySelector('#collisionOnboarding')) return;
+    try { if (localStorage.getItem(onboardingKey(user)) === 'seen') return; } catch {}
+    const quota = community.collisionQuota || { limit: 10 };
+    document.body.insertAdjacentHTML('beforeend', `<div class="onboarding-overlay" id="collisionOnboarding">
+      <section class="onboarding-dialog" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle">
+        <button class="onboarding-close" type="button" data-onboarding-close aria-label="关闭使用说明">×</button>
+        <div class="onboarding-hero"><img src="/web/assets/liu-kanshan-collision-guide.png" alt="刘看山把两张观点卡碰撞成新问题的示意图"></div>
+        <div class="onboarding-content">
+          <p class="onboarding-eyebrow">欢迎回来，${escape(user.name)}</p>
+          <h2 id="onboardingTitle">四步发现回答之间的新问题</h2>
+          <ol class="onboarding-steps">
+            <li><b>1</b><span><strong>选择两篇回答</strong>在同一个问题下挑选值得比较的回答。</span></li>
+            <li><b>2</b><span><strong>生成观点结构图</strong>蓝色末层卡片是可以参与碰撞的观点。</span></li>
+            <li><b>3</b><span><strong>拖动两张观点卡</strong>把来自不同回答的相关观点放到一起。</span></li>
+            <li><b>4</b><span><strong>查看并参与讨论</strong>AI 会说明关系并提出新的延申问题。</span></li>
+          </ol>
+          <aside class="onboarding-quota"><span>每日额度</span><strong>每人每天 ${escape(quota.limit)} 次碰撞</strong><p>点击“开始碰撞”就会计 1 次，<em>失败、无结果、缓存命中也计入总次数</em>；北京时间每天 0 点重置。</p></aside>
+          <button class="onboarding-start" type="button" data-onboarding-close>我知道了，开始探索</button>
+        </div>
+      </section>
+    </div>`);
+    requestAnimationFrame(() => document.querySelector('.onboarding-start')?.focus());
+  }
+
+  function dismissOnboarding() {
+    const user = community.session.user;
+    if (user) { try { localStorage.setItem(onboardingKey(user), 'seen'); } catch {} }
+    document.querySelector('#collisionOnboarding')?.remove();
   }
 
   function renderPage() {
@@ -256,6 +306,7 @@
       if (response.ok) community = await response.json();
     } catch {}
     renderPage();
+    showOnboardingIfNeeded();
   }
 
   function startLogin() {
@@ -279,6 +330,7 @@
   }
 
   document.addEventListener('click', async event => {
+    if (event.target.closest('[data-onboarding-close]')) { dismissOnboarding(); return; }
     const expand = event.target.closest('[data-expand-answer]');
     if (expand) {
       const answerId = expand.dataset.expandAnswer;
@@ -334,6 +386,11 @@
       const user = community.session.user;
       return user ? { id: user.id, name: user.name } : { id: 'local-guest', name: '本地体验者' };
     },
+    updateCollisionQuota(value) {
+      if (!value) return;
+      community.collisionQuota = value;
+      renderCollisionQuota();
+    },
     recordMap(answerId) {
       if (!answerId || !community.session.user) return Promise.resolve(false);
       return post('/api/community/action', { action: 'map', questionId: answerId.split('-')[0], answerId }).then(() => true).catch(() => false);
@@ -346,6 +403,7 @@
   };
 
   document.querySelector('.search input')?.addEventListener('focus', event => event.target.select());
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && document.querySelector('#collisionOnboarding')) dismissOnboarding(); });
   renderPage();
   loadCommunity();
 })();

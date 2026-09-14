@@ -2,8 +2,9 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { root } from './config.mjs';
+import { DAILY_COLLISION_LIMIT, chinaDayKey, collisionQuota } from './collision-quota.mjs';
 
-const emptyDatabase = () => ({ version: 3, sessions: {}, oauthStates: {}, answers: {}, dataset: null, maps: {}, collisionCache: {}, discoveries: {}, discoveryComments: {} });
+const emptyDatabase = () => ({ version: 4, sessions: {}, oauthStates: {}, collisionUsage: {}, answers: {}, dataset: null, maps: {}, collisionCache: {}, discoveries: {}, discoveryComments: {} });
 const toggleActions = new Set(['upvote', 'like', 'favorite']);
 
 export function createCommunityStore(filePath = resolve(root, 'runtime', 'community.json')) {
@@ -12,7 +13,7 @@ export function createCommunityStore(filePath = resolve(root, 'runtime', 'commun
   async function read() {
     try {
       const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-      return { ...emptyDatabase(), ...parsed, sessions: parsed.sessions || {}, oauthStates: parsed.oauthStates || {}, answers: parsed.answers || {}, maps: parsed.maps || {}, collisionCache: parsed.collisionCache || {}, discoveries: parsed.discoveries || {}, discoveryComments: parsed.discoveryComments || {} };
+      return { ...emptyDatabase(), ...parsed, sessions: parsed.sessions || {}, oauthStates: parsed.oauthStates || {}, collisionUsage: parsed.collisionUsage || {}, answers: parsed.answers || {}, maps: parsed.maps || {}, collisionCache: parsed.collisionCache || {}, discoveries: parsed.discoveries || {}, discoveryComments: parsed.discoveryComments || {} };
     } catch (error) {
       if (error.code === 'ENOENT') return emptyDatabase();
       throw error;
@@ -60,6 +61,22 @@ export function createCommunityStore(filePath = resolve(root, 'runtime', 'commun
   async function deleteSession(token) {
     if (!token) return;
     await mutate(database => { delete database.sessions[token]; });
+  }
+
+  async function getCollisionQuota(userId, now = Date.now()) {
+    if (!userId) return collisionQuota(0, now);
+    const database = await read();
+    return collisionQuota(database.collisionUsage[`${userId}|${chinaDayKey(now)}`] || 0, now);
+  }
+
+  async function consumeCollisionAttempt(user, now = Date.now()) {
+    return mutate(database => {
+      const key = `${user.id}|${chinaDayKey(now)}`;
+      const used = Number(database.collisionUsage[key]) || 0;
+      if (used >= DAILY_COLLISION_LIMIT) return { allowed: false, ...collisionQuota(used, now) };
+      database.collisionUsage[key] = used + 1;
+      return { allowed: true, ...collisionQuota(used + 1, now) };
+    });
   }
 
   async function saveOAuthState(state, browserNonce, returnTo) {
@@ -211,5 +228,5 @@ export function createCommunityStore(filePath = resolve(root, 'runtime', 'commun
     return snapshotFrom(await read(), userId);
   }
 
-  return { session, createSession, deleteSession, saveOAuthState, consumeOAuthState, getDataset, importDataset, getAnswerMaps, getAnswerMap, saveAnswerMap, pruneAnswerMaps, getCollisionCache, saveCollisionCache, listDiscoveries, saveDiscovery, commentDiscovery, updateDiscoveryStatus, withdrawDiscoveryComment, act, comment, snapshot };
+  return { session, createSession, deleteSession, getCollisionQuota, consumeCollisionAttempt, saveOAuthState, consumeOAuthState, getDataset, importDataset, getAnswerMaps, getAnswerMap, saveAnswerMap, pruneAnswerMaps, getCollisionCache, saveCollisionCache, listDiscoveries, saveDiscovery, commentDiscovery, updateDiscoveryStatus, withdrawDiscoveryComment, act, comment, snapshot };
 }
