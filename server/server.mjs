@@ -7,7 +7,7 @@ import { root, configuration } from './config.mjs';
 import { createStore } from './store.mjs';
 
 const PROMPT_VERSION = 'answer-tree-v2.10-onboarding-quota-reset';
-const APP_RELEASE = '2026-09-15.9-home-only-guide';
+const APP_RELEASE = '2026-09-15.10-consistent-header';
 // v2：碰撞判定改为「零成本预检闸门 + 两步模型判定（关系判定带举证责任 → 提问）」。
 // 判定口径变了，旧缓存必须失效，否则同一对节点会继续命中 v1 的误判结果。
 const COLLISION_VERSION = 'collision-v6-related-perspectives';

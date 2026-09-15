@@ -265,7 +265,7 @@
 
   function showOnboardingIfNeeded(force = false) {
     const user = community.session.user;
-    if (document.body.dataset.page !== 'home' || !user || document.querySelector('#collisionOnboarding')) return;
+    if ((!force && document.body.dataset.page !== 'home') || !user || document.querySelector('#collisionOnboarding')) return;
     try { if (!force && localStorage.getItem(onboardingKey(user)) === 'seen') return; } catch {}
     const quota = community.collisionQuota || { limit: 10 };
     document.body.insertAdjacentHTML('beforeend', `<div class="onboarding-overlay" id="collisionOnboarding">

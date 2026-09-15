@@ -213,21 +213,23 @@ test('问题详情说明缺失时不调模型，用已有字段生成兼容说�
   assert.match(helper,/这个问题具体落在\$\{audience\}身上/);
   assert.doesNotMatch(helper,/if\(!text\)return ''/);
 });
-test('使用说明和每日碰撞次数只放首页，首次说明不在问题页触发',()=>{
+test('首页与问题页顶部一致，但首次说明只在首页自动触发',()=>{
   const home=readFileSync(new URL('../web/index.html',import.meta.url),'utf8');
   const question=readFileSync(new URL('../web/question.html',import.meta.url),'utf8');
   const site=readFileSync(new URL('../web/site.js',import.meta.url),'utf8');
   const styles=readFileSync(new URL('../web/styles.css',import.meta.url),'utf8');
   const collision=readFileSync(new URL('../web/collision.js',import.meta.url),'utf8');
-  assert.match(home,/id="collisionQuota"/);
-  assert.match(home,/data-onboarding-open/);
-  assert.ok(home.indexOf('data-onboarding-open') < home.indexOf('id="collisionQuota"'));
-  assert.doesNotMatch(question,/id="collisionQuota"|data-onboarding-open/);
-  for(const page of [home,question]) assert.doesNotMatch(page,/class="zhida"|>.*直答.*<\/button>/);
+  for(const page of [home,question]){
+    assert.match(page,/id="collisionQuota"/);
+    assert.match(page,/data-onboarding-open/);
+    assert.ok(page.indexOf('data-onboarding-open') < page.indexOf('id="collisionQuota"'));
+    assert.doesNotMatch(page,/class="zhida"|>.*直答.*<\/button>/);
+  }
   assert.match(styles,/liu-kanshan-onboarding-steps\.png/);
   assert.match(styles,/grid-template-columns:auto auto minmax\(0,1fr\) 348px/);
   assert.match(site,/step-1[\s\S]*step-2[\s\S]*step-3[\s\S]*step-4/);
-  assert.match(site,/dataset\.page !== 'home'/);
+  assert.match(site,/!force && document\.body\.dataset\.page !== 'home'/);
+  assert.match(site,/showOnboardingIfNeeded\(true\)/);
   assert.match(site,/collision-onboarding-v2-home-only/);
   assert.match(site,/失败、无结果、缓存命中也计入总次数/);
   assert.doesNotMatch(collision,/querySelector\('\.zhida'\)/);
