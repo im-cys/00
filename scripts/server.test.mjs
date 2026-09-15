@@ -174,6 +174,9 @@ test('未登录访问业务页或旧登录地址时直接进入知乎授权，�
     assert.equal(legacyLogin.headers.get('location'), '/auth/zhihu?return_to=%2Fquestion%2F10001');
     const asset = await fetch(`${base}/web/styles.css`, { redirect: 'manual' });
     assert.equal(asset.status, 200, '静态资源不能被登录守卫拦截');
+    const guideAsset = await fetch(`${base}/web/assets/liu-kanshan-onboarding-steps.png`, { redirect: 'manual' });
+    assert.equal(guideAsset.status, 200);
+    assert.equal(guideAsset.headers.get('content-type'), 'image/png');
     loggedIn = true;
     const allowed = await fetch(`${base}/question/10001?from=home`, { headers: { Cookie: 'qm_session=test' }, redirect: 'manual' });
     assert.equal(allowed.status, 200);

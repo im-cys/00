@@ -254,7 +254,7 @@
     badge.hidden = !signedIn;
     badge.classList.toggle('is-low', signedIn && quota.remaining > 0 && quota.remaining <= 3);
     badge.classList.toggle('is-empty', signedIn && quota.remaining === 0);
-    badge.innerHTML = `<span>今日碰撞</span><strong>${escape(quota.remaining)}/${escape(quota.limit)}</strong>`;
+    badge.innerHTML = `<span>今日剩余</span><strong>${escape(quota.remaining)} 次</strong>`;
     badge.title = `今天已使用 ${quota.used} 次；失败或无结果也计入，每天 0 点重置。`;
   }
 
@@ -262,25 +262,25 @@
     return `${ONBOARDING_VERSION}:${String(user?.id || '')}`;
   }
 
-  function showOnboardingIfNeeded() {
+  function showOnboardingIfNeeded(force = false) {
     const user = community.session.user;
     if (!user || document.querySelector('#collisionOnboarding')) return;
-    try { if (localStorage.getItem(onboardingKey(user)) === 'seen') return; } catch {}
+    try { if (!force && localStorage.getItem(onboardingKey(user)) === 'seen') return; } catch {}
     const quota = community.collisionQuota || { limit: 10 };
     document.body.insertAdjacentHTML('beforeend', `<div class="onboarding-overlay" id="collisionOnboarding">
       <section class="onboarding-dialog" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle">
         <button class="onboarding-close" type="button" data-onboarding-close aria-label="关闭使用说明">×</button>
-        <div class="onboarding-hero"><img src="/web/assets/liu-kanshan-collision-guide.png" alt="刘看山把两张观点卡碰撞成新问题的示意图"></div>
         <div class="onboarding-content">
           <p class="onboarding-eyebrow">欢迎回来，${escape(user.name)}</p>
-          <h2 id="onboardingTitle">四步发现回答之间的新问题</h2>
+          <h2 id="onboardingTitle">四步完成一次观点碰撞</h2>
+          <p class="onboarding-intro">从两篇回答中选择相关观点，碰撞出一个值得继续讨论的新问题。</p>
           <ol class="onboarding-steps">
-            <li><b>1</b><span><strong>选择两篇回答</strong>在同一个问题下挑选值得比较的回答。</span></li>
-            <li><b>2</b><span><strong>生成观点结构图</strong>蓝色末层卡片是可以参与碰撞的观点。</span></li>
-            <li><b>3</b><span><strong>拖动两张观点卡</strong>把来自不同回答的相关观点放到一起。</span></li>
-            <li><b>4</b><span><strong>查看并参与讨论</strong>AI 会说明关系并提出新的延申问题。</span></li>
+            <li><div class="onboarding-step-art step-1" role="img" aria-label="刘看山选择两篇回答的示意图"></div><div class="onboarding-step-copy"><b>1</b><span><strong>选择两篇回答</strong>进入一个问题，在回答列表中选中两篇想要比较的回答。</span></div></li>
+            <li><div class="onboarding-step-art step-2" role="img" aria-label="刘看山查看两份观点结构图的示意图"></div><div class="onboarding-step-copy"><b>2</b><span><strong>生成观点结构图</strong>为两篇回答生成结构图，蓝色末层卡片可以参与碰撞。</span></div></li>
+            <li><div class="onboarding-step-art step-3" role="img" aria-label="刘看山拖动两张观点卡进行碰撞的示意图"></div><div class="onboarding-step-copy"><b>3</b><span><strong>拖动观点进行碰撞</strong>从两份图中各拖一张相关观点卡，让系统分析它们的联系。</span></div></li>
+            <li><div class="onboarding-step-art step-4" role="img" aria-label="刘看山查看新问题并参与讨论的示意图"></div><div class="onboarding-step-copy"><b>4</b><span><strong>查看新问题并讨论</strong>阅读 AI 分析和引申问题，发布节点、回答或参与评论。</span></div></li>
           </ol>
-          <aside class="onboarding-quota"><span>每日额度</span><strong>每人每天 ${escape(quota.limit)} 次碰撞</strong><p>点击“开始碰撞”就会计 1 次，<em>失败、无结果、缓存命中也计入总次数</em>；北京时间每天 0 点重置。</p></aside>
+          <aside class="onboarding-quota"><span>每日额度</span><strong>今日剩余 ${escape(quota.remaining ?? quota.limit)} 次，共 ${escape(quota.limit)} 次</strong><p>点击“开始碰撞”就会计 1 次，<em>失败、无结果、缓存命中也计入总次数</em>；北京时间每天 0 点重置。</p></aside>
           <button class="onboarding-start" type="button" data-onboarding-close>我知道了，开始探索</button>
         </div>
       </section>
@@ -334,6 +334,7 @@
 
   document.addEventListener('click', async event => {
     if (event.target.closest('[data-onboarding-close]')) { dismissOnboarding(); return; }
+    if (event.target.closest('[data-onboarding-open]')) { showOnboardingIfNeeded(true); return; }
     const expand = event.target.closest('[data-expand-answer]');
     if (expand) {
       const answerId = expand.dataset.expandAnswer;
