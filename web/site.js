@@ -11,7 +11,8 @@
   const expandedAnswers = new Set();
   const openCommentPanels = new Set();
   const requestedComments = new URLSearchParams(location.search).get('comments');
-  const ONBOARDING_VERSION = 'collision-onboarding-v1';
+  // v1 曾在问题页误触发；升级 key，确保用户回到首页后能看到一次正确说明。
+  const ONBOARDING_VERSION = 'collision-onboarding-v2-home-only';
   if (requestedComments) openCommentPanels.add(requestedComments);
   let community = { answers: {}, questions: {}, session: { user: null, configured: false } };
 
@@ -264,7 +265,7 @@
 
   function showOnboardingIfNeeded(force = false) {
     const user = community.session.user;
-    if (!user || document.querySelector('#collisionOnboarding')) return;
+    if (document.body.dataset.page !== 'home' || !user || document.querySelector('#collisionOnboarding')) return;
     try { if (!force && localStorage.getItem(onboardingKey(user)) === 'seen') return; } catch {}
     const quota = community.collisionQuota || { limit: 10 };
     document.body.insertAdjacentHTML('beforeend', `<div class="onboarding-overlay" id="collisionOnboarding">
@@ -313,7 +314,7 @@
       return;
     }
     renderPage();
-    showOnboardingIfNeeded();
+    if (document.body.dataset.page === 'home') showOnboardingIfNeeded();
   }
 
   function startLogin() {
@@ -408,6 +409,9 @@
 
   document.querySelector('.search input')?.addEventListener('focus', event => event.target.select());
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && document.querySelector('#collisionOnboarding')) dismissOnboarding(); });
+  // 从登录页或问题页切回已打开的首页时，刷新账号与额度；浏览器恢复旧快照时强制重载。
+  window.addEventListener('pageshow', event => { if (event.persisted) location.reload(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') loadCommunity(); });
   renderPage();
   loadCommunity();
 })();

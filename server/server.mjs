@@ -7,7 +7,7 @@ import { root, configuration } from './config.mjs';
 import { createStore } from './store.mjs';
 
 const PROMPT_VERSION = 'answer-tree-v2.10-onboarding-quota-reset';
-const APP_RELEASE = '2026-09-15.8-home-guide-and-quota';
+const APP_RELEASE = '2026-09-15.9-home-only-guide';
 // v2：碰撞判定改为「零成本预检闸门 + 两步模型判定（关系判定带举证责任 → 提问）」。
 // 判定口径变了，旧缓存必须失效，否则同一对节点会继续命中 v1 的误判结果。
 const COLLISION_VERSION = 'collision-v6-related-perspectives';
@@ -361,7 +361,7 @@ export function createServer(config, store) {
       if (req.method === 'GET' && (files.has(path) || /^\/question\/[\w-]+$/.test(path) || vendorFile)) {
         const file = vendorFile || files.get(path) || 'web/question.html'; const data = await readFile(resolve(root, file));
         const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf' }[extname(file)] || 'application/octet-stream';
-        res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.zhimg.com; connect-src 'self'; frame-ancestors 'none'" }); return res.end(data);
+        res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0', Pragma: 'no-cache', Expires: '0', 'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.zhimg.com; connect-src 'self'; frame-ancestors 'none'" }); return res.end(data);
       }
       return send(res, 404, { error: 'Not found' });
     } catch (error) {
