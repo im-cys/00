@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createCommunityStore } from '../server/community-store.mjs';
-import { createServer, publicMapError } from '../server/server.mjs';
+import { createServer, publicCollisionStorageError, publicMapError } from '../server/server.mjs';
 import { configuration } from '../server/config.mjs';
 import { chinaDayKey } from '../server/collision-quota.mjs';
 
@@ -129,6 +129,79 @@ test('碰撞接口在处理失败前扣除次数，第十一次返回 429', asyn
   } finally {
     await new Promise(resolve => server.close(resolve));
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('碰撞计数表缺失时返回明确修复提示，社区接口仍可加载', async () => {
+  const missingTable = new Error("Could not find the table 'public.daily_collision_attempts' in the schema cache");
+  const user = { id: 'zhihu-quota-missing', name: '测试用户', provider: 'zhihu' };
+  const store = {
+    session: async () => user,
+    snapshot: async () => ({ answers: {}, questions: {} }),
+    getCollisionQuota: async () => { throw missingTable; },
+    consumeCollisionAttempt: async () => { throw missingTable; }
+  };
+  const config = {
+    allowedHosts: ['127.0.0.1'], allowedOrigins: [], collideBase: 'http://127.0.0.1:3311', useDatabase: true, aiModel: 'deepseek-v4-pro',
+    zhihuAuth: { configured: true, redirectUri: 'http://127.0.0.1/auth/zhihu/callback' }
+  };
+  const server = createServer(config, store);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const community = await fetch(`${base}/api/community`, { headers: { Cookie: 'qm_session=test' } });
+    assert.equal(community.status, 200);
+    const communityBody = await community.json();
+    assert.equal(communityBody.collisionQuota.unavailable, true);
+    assert.equal(communityBody.collisionQuota.remaining, null);
+    assert.match(communityBody.collisionQuota.reason, /database\/schema\.sql/);
+    const collision = await fetch(`${base}/api/collide`, {
+      method: 'POST', headers: { Cookie: 'qm_session=test', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ questionId: '10001', refs: [{ answerId: '10001-01', nodeId: 'a' }, { answerId: '10001-02', nodeId: 'b' }] })
+    });
+    assert.equal(collision.status, 503);
+    const collisionBody = await collision.json();
+    assert.equal(collisionBody.code, 'COLLISION_QUOTA_UNAVAILABLE');
+    assert.match(collisionBody.reason, /数据表尚未初始化/);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test('碰撞结果生成后即使缓存写入失败也照常返回', async () => {
+  const upstream = createHttpServer(async (req, res) => {
+    if (req.method !== 'POST' || req.url !== '/collide') { res.writeHead(404).end(); return; }
+    const body = JSON.stringify({ status: 'published', relation_type: 'complementary', relation_text: '两种视角可以互相补充。', question: '怎样把两种视角合起来？', question_detail: '需要同时考虑两边的条件。' });
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }); res.end(body);
+  });
+  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+  const user = { id: 'zhihu-cache-test', name: '测试用户', provider: 'zhihu' };
+  const answer = id => ({ id, author: id, paragraphs: [`${id} 的回答正文。`] });
+  const store = {
+    session: async () => user,
+    consumeCollisionAttempt: async () => ({ allowed: true, day: '2026-09-15', limit: 10, used: 1, remaining: 9, resetAt: 0 }),
+    getCollisionCache: async () => null,
+    getDataset: async () => ({ payload: { questions: [{ id: '10001', title: '测试问题', answers: [answer('10001-01'), answer('10001-02')] }] } }),
+    getAnswerMap: async answerId => ({ payload: { schemaVersion: 'answer-tree-v2', answerId, nodes: [] } }),
+    saveCollisionCache: async () => { throw new Error('permission denied for table collision_cache'); }
+  };
+  const config = {
+    allowedHosts: ['127.0.0.1'], allowedOrigins: [], collideBase: `http://127.0.0.1:${upstream.address().port}`, useDatabase: true, aiModel: 'deepseek-v4-pro',
+    zhihuAuth: { configured: true, redirectUri: 'http://127.0.0.1/auth/zhihu/callback' }
+  };
+  const server = createServer(config, store);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/collide`, {
+      method: 'POST', headers: { Cookie: 'qm_session=test', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ questionId: '10001', refs: [{ answerId: '10001-01', nodeId: 'a' }, { answerId: '10001-02', nodeId: 'b' }] })
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.status, 'published');
+    assert.equal(body.cacheStored, false);
+    assert.equal(body.collisionQuota.remaining, 9);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    await new Promise(resolve => upstream.close(resolve));
   }
 });
 
@@ -387,4 +460,10 @@ test('生成失败会区分模型网络、限流和观点树校验错误', () =>
   assert.match(publicMapError(new Error('HTTPSConnectionPool: Read timed out')), /无法连接模型接口/);
   assert.match(publicMapError(new Error('观点树校验失败')), /没有通过新版观点树校验/);
   assert.match(publicMapError(new DOMException('The operation was aborted due to timeout', 'TimeoutError')), /超过 15 分钟/);
+});
+
+test('碰撞存储错误会区分计数表缺失和权限问题', () => {
+  assert.match(publicCollisionStorageError(new Error("Could not find the table 'public.daily_collision_attempts' in the schema cache")), /尚未初始化/);
+  assert.match(publicCollisionStorageError(new Error('permission denied for table daily_collision_attempts')), /权限未生效/);
+  assert.match(publicCollisionStorageError(new Error('connection reset')), /暂时不可用/);
 });

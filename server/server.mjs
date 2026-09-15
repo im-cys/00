@@ -5,9 +5,10 @@ import { createHash, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { root, configuration } from './config.mjs';
 import { createStore } from './store.mjs';
+import { collisionQuota as quotaSnapshot } from './collision-quota.mjs';
 
 const PROMPT_VERSION = 'answer-tree-v2.10-onboarding-quota-reset';
-const APP_RELEASE = '2026-09-15.10-consistent-header';
+const APP_RELEASE = '2026-09-15.11-collision-recovery';
 // v2：碰撞判定改为「零成本预检闸门 + 两步模型判定（关系判定带举证责任 → 提问）」。
 // 判定口径变了，旧缓存必须失效，否则同一对节点会继续命中 v1 的误判结果。
 const COLLISION_VERSION = 'collision-v6-related-perspectives';
@@ -58,6 +59,21 @@ export function publicMapError(error) {
   return '结构图生成失败，请稍后重试。';
 }
 
+export function publicCollisionStorageError(error) {
+  const message = String(error?.message || error || '');
+  if (/permission denied|row-level security|42501|not authorized/i.test(message)) {
+    return '每日碰撞次数数据表权限未生效。请管理员在 CloudBase SQL 编辑器重新执行最新版 database/schema.sql。';
+  }
+  if (/PGRST205|schema cache|relation .*daily_collision_attempts.* does not exist|could not find (?:the )?table.*daily_collision_attempts/i.test(message)) {
+    return '每日碰撞次数数据表尚未初始化。请管理员在 CloudBase SQL 编辑器重新执行最新版 database/schema.sql。';
+  }
+  return '每日碰撞计数暂时不可用，请稍后重试。';
+}
+
+function unavailableCollisionQuota(error, now = Date.now()) {
+  return { ...quotaSnapshot(0, now), used: null, remaining: null, unavailable: true, reason: publicCollisionStorageError(error) };
+}
+
 export function createServer(config, store) {
   const collideBase = config.collideBase || 'http://127.0.0.1:3311';
   const mapJobs = new Map();
@@ -95,6 +111,13 @@ export function createServer(config, store) {
   const sessionInfo = user => ({ user, provider: user?.provider || null, configured: Boolean(config.zhihuAuth?.configured) });
   const send = (res, status, data) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(data)); };
   const currentUser = req => store.session(cookies(req).qm_session);
+  const safeCollisionQuota = async userId => {
+    try { return await store.getCollisionQuota(userId); }
+    catch (error) {
+      console.error('[collision-quota:read]', error);
+      return unavailableCollisionQuota(error);
+    }
+  };
   const validStoredMap = async answerId => {
     const dataset = datasetValue(await store.getDataset());
     const source = answerFrom(dataset, answerId);
@@ -259,14 +282,14 @@ export function createServer(config, store) {
 
       if (req.method === 'GET' && path === '/api/community') {
         const user = await currentUser(req);
-        const [snapshot, collisionQuota] = await Promise.all([store.snapshot(user?.id || ''), store.getCollisionQuota(user?.id || '')]);
+        const [snapshot, collisionQuota] = await Promise.all([store.snapshot(user?.id || ''), safeCollisionQuota(user?.id || '')]);
         return send(res, 200, { ...snapshot, collisionQuota, session: sessionInfo(user) });
       }
       if (req.method === 'POST' && /^\/api\/community\/(action|comment)$/.test(path)) {
         const user = await currentUser(req); if (!user) return send(res, 401, { error: '请先使用知乎账号登录。' });
         const input = await jsonBody(req);
         const snapshot = path.endsWith('/action') ? await store.act(user, input) : await store.comment(user, input);
-        return send(res, 200, { ...snapshot, collisionQuota: await store.getCollisionQuota(user.id), session: sessionInfo(user) });
+        return send(res, 200, { ...snapshot, collisionQuota: await safeCollisionQuota(user.id), session: sessionInfo(user) });
       }
 
       if (req.method === 'GET' && path === '/api/discoveries') return send(res, 200, await store.listDiscoveries(url.searchParams.get('questionId') || ''));
@@ -288,8 +311,13 @@ export function createServer(config, store) {
       }
 
       if (req.method === 'GET' && path === '/api/collide/health') {
-        try { const upstream = await fetch(`${collideBase}/health`, { signal: AbortSignal.timeout(5000) }); return send(res, 200, { ...(await upstream.json()), connected: true }); }
-        catch { return send(res, 200, { ok: false, connected: false, error: '碰撞服务未启动。' }); }
+        let quotaStorage = { ready: true };
+        if (store.getCollisionQuota) {
+          try { await store.getCollisionQuota('__collision_healthcheck__'); }
+          catch (error) { quotaStorage = { ready: false, reason: publicCollisionStorageError(error) }; }
+        }
+        try { const upstream = await fetch(`${collideBase}/health`, { signal: AbortSignal.timeout(5000) }); return send(res, 200, { ...(await upstream.json()), connected: true, quotaStorage }); }
+        catch { return send(res, 200, { ok: false, connected: false, error: '碰撞服务未启动。', quotaStorage }); }
       }
       if (req.method === 'GET' && path === '/api/collide/maps') return send(res, 200, { questionId: url.searchParams.get('qid') || '', answers: currentAnswerMaps(await store.getAnswerMaps(url.searchParams.get('qid') || '')) });
 
@@ -326,25 +354,55 @@ export function createServer(config, store) {
         const user = await currentUser(req); if (!user) return send(res, 401, { error: '请先使用知乎账号登录。' });
         const input = await jsonBody(req);
         // 点击“开始碰撞”即计一次：缓存命中、模型无结果和生成失败都不能退回次数。
-        const collisionQuota = await store.consumeCollisionAttempt(user);
+        let collisionQuota;
+        try { collisionQuota = await store.consumeCollisionAttempt(user); }
+        catch (error) {
+          console.error('[collision-quota:consume]', error);
+          const unavailable = unavailableCollisionQuota(error);
+          return send(res, 503, { status: 'blocked', code: 'COLLISION_QUOTA_UNAVAILABLE', error: unavailable.reason, reason: unavailable.reason, collisionQuota: unavailable });
+        }
         if (!collisionQuota.allowed) return send(res, 429, { status: 'blocked', code: 'DAILY_COLLISION_LIMIT', error: '今日 10 次碰撞机会已用完，请明天再来。', reason: '今日 10 次碰撞机会已用完，请明天再来。', collisionQuota });
         const refs = input.refs || [];
         if (refs.length !== 2) return send(res, 400, { status: 'blocked', error: '需要恰好两个节点。', reason: '需要恰好两个节点。', collisionQuota });
         const normalized = refs.map(ref => ({ answerId: String(ref.answerId), nodeId: String(ref.nodeId) })).sort((a, b) => `${a.answerId}:${a.nodeId}`.localeCompare(`${b.answerId}:${b.nodeId}`));
         const questionId = input.questionId || normalized[0].answerId.split('-')[0];
         const cacheKey = sha256({ questionId, refs: normalized, model: config.aiModel, version: COLLISION_VERSION });
-        const cached = await store.getCollisionCache(cacheKey); if (cached) return send(res, 200, { ...cached, cacheHit: true, collisionQuota });
-        const dataset = datasetValue(await store.getDataset()); const contexts = [];
-        for (const ref of refs) { const source = answerFrom(dataset, ref.answerId); const map = await store.getAnswerMap(ref.answerId); if (!source || !map?.payload) return send(res, 400, { status: 'blocked', reason: '所选回答缺少正文或结构图。', collisionQuota }); contexts.push({ answerId: ref.answerId, author: source.answer.author || '', questionTitle: source.question.title || '', content: source.content, map: map.payload }); }
+        let cached = null;
+        try { cached = await store.getCollisionCache(cacheKey); }
+        catch (error) { console.error('[collision-cache:read]', error); }
+        if (cached) return send(res, 200, { ...cached, cacheHit: true, collisionQuota });
+        const contexts = [];
+        try {
+          const dataset = datasetValue(await store.getDataset());
+          for (const ref of refs) {
+            const source = answerFrom(dataset, ref.answerId); const map = await store.getAnswerMap(ref.answerId);
+            if (!source || !map?.payload) return send(res, 400, { status: 'blocked', reason: '所选回答缺少正文或结构图。', collisionQuota });
+            contexts.push({ answerId: ref.answerId, author: source.answer.author || '', questionTitle: source.question.title || '', content: source.content, map: map.payload });
+          }
+        } catch (error) {
+          console.error('[collision-context:read]', error);
+          return send(res, 503, { status: 'blocked', code: 'COLLISION_CONTEXT_UNAVAILABLE', reason: '读取回答正文或结构图失败，请稍后重试。本次尝试仍计入今日次数。', collisionQuota });
+        }
         let result;
         try {
           const upstream = await fetch(`${collideBase}/collide`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...input, questionId, answerContexts: contexts }), signal: AbortSignal.timeout(300000) });
-          result = await upstream.json();
-        } catch {
-          return send(res, 502, { status: 'blocked', reason: '碰撞服务暂时不可用，本次尝试仍计入今日次数。', collisionQuota });
+          const upstreamText = await upstream.text();
+          try { result = JSON.parse(upstreamText); }
+          catch { throw new Error(`碰撞服务返回了非 JSON 响应（HTTP ${upstream.status}）。`); }
+          if (!upstream.ok) throw new Error(result?.reason || result?.error || `碰撞服务返回 HTTP ${upstream.status}`);
+        } catch (error) {
+          console.error('[collision-upstream]', error);
+          return send(res, 502, { status: 'blocked', code: 'COLLISION_SERVICE_UNAVAILABLE', reason: '碰撞模型服务暂时不可用，请稍后重试。本次尝试仍计入今日次数。', collisionQuota });
         }
-        await store.saveCollisionCache({ cacheKey, questionId, answerIds: normalized.map(item => item.answerId), nodeIds: normalized.map(item => item.nodeId), result, model: config.aiModel, promptVersion: COLLISION_VERSION });
-        return send(res, 200, { ...result, cacheHit: false, collisionQuota });
+        let cacheStored = true;
+        try {
+          await store.saveCollisionCache({ cacheKey, questionId, answerIds: normalized.map(item => item.answerId), nodeIds: normalized.map(item => item.nodeId), result, model: config.aiModel, promptVersion: COLLISION_VERSION });
+        } catch (error) {
+          // 缓存只是性能优化，写入失败不能吞掉模型已经生成的有效碰撞结果。
+          cacheStored = false;
+          console.error('[collision-cache:save]', error);
+        }
+        return send(res, 200, { ...result, cacheHit: false, cacheStored, collisionQuota });
       }
 
       if (req.method === 'GET' && (path === '/content/data.js' || path === '/content/collision-maps.js')) {

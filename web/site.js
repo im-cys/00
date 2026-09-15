@@ -253,8 +253,14 @@
     const quota = community.collisionQuota || { limit: 10, used: 0, remaining: 10 };
     const signedIn = Boolean(community.session.user);
     badge.hidden = !signedIn;
-    badge.classList.toggle('is-low', signedIn && quota.remaining > 0 && quota.remaining <= 3);
-    badge.classList.toggle('is-empty', signedIn && quota.remaining === 0);
+    badge.classList.toggle('is-low', signedIn && !quota.unavailable && quota.remaining > 0 && quota.remaining <= 3);
+    badge.classList.toggle('is-empty', signedIn && !quota.unavailable && quota.remaining === 0);
+    badge.classList.toggle('is-unavailable', signedIn && Boolean(quota.unavailable));
+    if (quota.unavailable) {
+      badge.innerHTML = '<span>碰撞额度</span><strong>待启用</strong>';
+      badge.title = quota.reason || '每日碰撞计数暂时不可用。';
+      return;
+    }
     badge.innerHTML = `<span>今日剩余</span><strong>${escape(quota.remaining)} 次</strong>`;
     badge.title = `今天已使用 ${quota.used} 次；失败或无结果也计入，每天 0 点重置。`;
   }
